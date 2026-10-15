@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Eng word</title>
+<meta name="description" content="Учим английские слова по интервальному повторению. Работает без интернета, синхронизируется через ваш Google Drive.">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Eng word">
+<link rel="manifest" href="manifest.webmanifest?v=1">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo" aria-hidden="true">Ew</span><span class="brand-name">Eng word</span></div>
+  <button type="button" class="chip" id="chip" data-act="chip" aria-live="polite">Только на этом устройстве</button>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Разделы">
+  <button type="button" data-act="tab" data-tab="study" class="on">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>
+    <span>Учить</span>
+  </button>
+  <button type="button" data-act="tab" data-tab="words">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
+    <span>Слова</span>
+  </button>
+  <button type="button" data-act="tab" data-tab="settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    <span>Ещё</span>
+  </button>
+</nav>
+
+<main id="view" tabindex="-1"></main>
+
+<div id="study-root"></div>
+<div id="modal-root"></div>
+<div id="viewer-root"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<noscript><p style="padding:24px">Для работы приложения нужен JavaScript.</p></noscript>
+
+<script src="core.js?v=1"></script>
+<script src="srs.js?v=1"></script>
+<script src="csv.js?v=1"></script>
+<script src="tts.js?v=1"></script>
+<script src="drive.js?v=1"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,724 @@
+/* Eng word — интерфейс */
+(function () {
+  'use strict';
+  const EW = window.EW;
+  const core = EW.core, M = core.meta, srs = EW.srs, D = EW.drive, tts = EW.tts, csv = EW.csv;
+
+  const $ = (s, r) => (r || document).querySelector(s);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const svg = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>';
+  const I = {
+    speaker: svg('<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>'),
+    close: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
+    undo: svg('<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>'),
+    plus: svg('<path d="M12 5v14M5 12h14"/>'),
+    trash: svg('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>'),
+    clip: svg('<path d="m21.4 11-9.2 9.2a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/>'),
+  };
+
+  const view = $('#view');
+  let tab = 'study';
+  let study = null;
+  let form = null;
+  let imp = null;
+  const wordsUI = { q: '', filter: 'all', limit: 80 };
+  let viewerUrl = '';
+  let installEvt = null;
+
+  /* ---------- общее ---------- */
+  const S = () => core.S;
+  const getWord = (id) => { const w = core.get('words', id); return w && !w.d ? w : null; };
+  const liveWords = () => core.live('words');
+  function fmtSize(b) {
+    b = +b || 0;
+    if (b < 1024) return b + ' Б';
+    if (b < 1048576) return Math.round(b / 1024) + ' КБ';
+    return (Math.round((b / 1048576) * 10) / 10).toString().replace('.', ',') + ' МБ';
+  }
+  let toastTimer = 0;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+  function speakText(text) {
+    if (!tts.supported) { toast('Этот браузер не умеет озвучивать текст'); return; }
+    if (!text) return;
+    tts.speak(text, { accent: M.accent, voice: M.voice, rate: M.rate }).then((ok) => {
+      if (!ok && !tts.list().length) toast('На устройстве нет английского голоса. Установите его в настройках синтеза речи');
+    });
+  }
+  function download(name, text, type) {
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  const dateStr = () => new Date().toISOString().slice(0, 10);
+
+  /* ---------- шапка ---------- */
+  function updateChip() {
+    const c = $('#chip');
+    const st = D.status;
+    let txt = 'Только на этом устройстве';
+    if (M.signedIn) {
+      if (st.k === 'sync') txt = 'Синхронизация…';
+      else if (st.k === 'ok') txt = 'Синхронизировано' + (M.lastSync ? ' в ' + new Date(M.lastSync).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '');
+      else if (st.k === 'authneeded') txt = 'Нужен вход';
+      else if (st.k === 'offline') txt = 'Нет сети';
+      else if (st.k === 'error') txt = 'Ошибка синхронизации';
+    }
+    c.textContent = txt;
+    c.className = 'chip' + (M.signedIn ? ' ' + st.k : '');
+    c.title = M.signedIn && st.msg ? st.msg : '';
+    const sc = $('#syncCard');
+    if (sc) sc.innerHTML = syncCardHTML();
+  }
+
+  /* ---------- вкладки ---------- */
+  function show(t) {
+    tab = t;
+    view.dataset.tab = '';
+    document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    render();
+    window.scrollTo(0, 0);
+  }
+  function render() {
+    updateChip();
+    if (study) return;
+    if (tab === 'study') renderHome();
+    else if (tab === 'words') renderWords();
+    else renderSettings();
+  }
+  function onChanged() {
+    if (study) { updateChip(); return; }
+    if (tab === 'settings') { updateChip(); refreshData(); return; }
+    render();
+  }
+
+  /* ---------- главная ---------- */
+  function opts() { return { dirs: S().settings.dirs, newPerDay: S().settings.newPerDay }; }
+  function streak() {
+    const m = new Map(S().days.filter((d) => !d.d).map((d) => [d.id, d]));
+    let d = srs.dayNum();
+    if (!(m.get('d' + d) && m.get('d' + d).n > 0)) d--;
+    let s = 0;
+    while (m.get('d' + d) && m.get('d' + d).n > 0) { s++; d--; }
+    return s;
+  }
+  function masteredWords(words) {
+    const dirs = S().settings.dirs;
+    let n = 0;
+    for (const w of words) {
+      const ks = ['f', 'b'].filter((k) => dirs[k]);
+      if (ks.length && ks.every((k) => w[k] && w[k].st === srs.REVIEW && w[k].iv >= 21)) n++;
+    }
+    return n;
+  }
+  function renderHome() {
+    view.dataset.tab = 'study';
+    const words = liveWords();
+    if (!words.length) {
+      view.innerHTML =
+        '<div class="card empty-state"><h2>Начнём учить слова</h2><p>Добавьте первое слово или загрузите сразу много из CSV-файла. Приложение само подскажет, когда повторять каждое слово.</p>' +
+        '<div class="row wrap" style="justify-content:center"><button class="btn primary" data-act="add">' + I.plus + 'Добавить слово</button><button class="btn" data-act="import">Импорт из CSV</button></div></div>';
+      return;
+    }
+    const st = srs.stats(words, opts());
+    const todo = st.learn + st.review + st.newLeft;
+    const today = srs.dayNum();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = core.get('days', 'd' + (today - i));
+      days.push({ n: d && !d.d ? d.n : 0, label: new Date(Date.now() - i * 864e5).toLocaleDateString('ru-RU', { weekday: 'short' }) });
+    }
+    const max = Math.max(1, ...days.map((d) => d.n));
+    const todayN = days[6].n;
+    const sk = streak();
+    view.innerHTML =
+      '<div class="card"><div class="stat-grid">' +
+      '<div class="stat accent"><b id="n-due">' + (st.learn + st.review) + '</b><span>повторить сейчас</span></div>' +
+      '<div class="stat"><b id="n-new">' + st.newLeft + '</b><span>новых на сегодня</span></div>' +
+      '<div class="stat"><b>' + st.total + '</b><span>всего слов</span></div>' +
+      '<div class="stat"><b>' + masteredWords(words) + '</b><span>прочно выучено</span></div></div>' +
+      '<button class="btn primary big" data-act="study-start"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Начать занятие' : 'На сегодня всё') + '</button>' +
+      (todo ? '' : '<p class="muted small" style="text-align:center;margin:10px 0 0">Следующие карточки появятся по расписанию. Можно добавить новые слова.</p>') +
+      '</div>' +
+      '<div class="card"><h3>Активность</h3><div class="muted small">Сегодня повторено: ' + todayN + (sk ? ' · дней подряд: ' + sk : '') + '</div>' +
+      '<div class="bars">' + days.map((d) => '<div class="' + (d.n ? '' : 'empty') + '" title="' + d.n + '"><i style="height:' + Math.max(4, Math.round((d.n / max) * 40)) + 'px"></i><span>' + esc(d.label) + '</span></div>').join('') + '</div></div>';
+  }
+
+  /* ---------- список слов ---------- */
+  const STATE_LABEL = { new: 'Новое', due: 'Пора повторить', learning: 'Учится', review: 'Выучивается' };
+  function renderWords() {
+    if (view.dataset.tab !== 'words') {
+      view.dataset.tab = 'words';
+      view.innerHTML =
+        '<div class="toolbar"><input type="search" id="w-q" class="grow" placeholder="Поиск по словам" value="' + esc(wordsUI.q) + '" aria-label="Поиск">' +
+        '<select id="w-f" aria-label="Фильтр" style="width:auto"><option value="all">Все</option><option value="new">Новые</option><option value="due">К повторению</option><option value="learning">Учатся</option><option value="review">Выучиваются</option></select></div>' +
+        '<div class="toolbar"><button class="btn primary" data-act="add">' + I.plus + 'Добавить</button><button class="btn" data-act="import">Импорт</button><button class="btn" data-act="export">Экспорт</button></div>' +
+        '<div class="muted small" id="wcount" style="margin-bottom:8px"></div><div class="wlist" id="wlist"></div><div class="more" id="wmore"></div>';
+      $('#w-f').value = wordsUI.filter;
+    }
+    renderWordList();
+  }
+  function renderWordList() {
+    const q = wordsUI.q.trim().toLowerCase();
+    const now = Date.now();
+    let list = liveWords();
+    const total = list.length;
+    if (q) list = list.filter((w) => w.en.toLowerCase().includes(q) || w.ru.toLowerCase().includes(q));
+    if (wordsUI.filter !== 'all') list = list.filter((w) => srs.wordState(w, now) === wordsUI.filter);
+    list.sort((a, b) => (b.c || 0) - (a.c || 0));
+    const shown = list.slice(0, wordsUI.limit);
+    $('#wcount').textContent = total ? 'Слов: ' + total + (list.length !== total ? ' · найдено: ' + list.length : '') : '';
+    $('#wlist').innerHTML = shown.length
+      ? shown.map((w) => {
+          const s = srs.wordState(w, now);
+          return '<div class="wi" data-act="edit" data-id="' + esc(w.id) + '"><div class="wi-main"><div class="wi-en">' + esc(w.en) +
+            (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span></div><div class="wi-ru">' + esc(w.ru) + '</div></div>' +
+            '<button class="icon-btn plain" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
+        }).join('')
+      : '<div class="card empty-state" style="box-shadow:none"><p>' + (total ? 'Ничего не найдено.' : 'Слов пока нет. Нажмите «Добавить» или загрузите CSV.') + '</p></div>';
+    $('#wmore').innerHTML = list.length > shown.length ? '<button class="btn" data-act="more">Показать ещё (' + (list.length - shown.length) + ')</button>' : '';
+  }
+
+  /* ---------- окна ---------- */
+  function openModal(html, cls) {
+    $('#modal-root').innerHTML = '<div class="overlay" data-act="modal-bg"><div class="sheet ' + (cls || '') + '" role="dialog" aria-modal="true">' + html + '</div></div>';
+    document.body.classList.add('noscroll');
+  }
+  function closeModal() {
+    if (form && form.busy) return;
+    $('#modal-root').innerHTML = '';
+    if (!study) document.body.classList.remove('noscroll');
+    form = null; imp = null;
+  }
+  function closeViewer() {
+    const r = $('#viewer-root');
+    if (r) r.innerHTML = '';
+    if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = ''; }
+  }
+
+  /* ---------- форма слова ---------- */
+  function openWordForm(id) {
+    const w = id ? getWord(id) : null;
+    form = { id: w ? w.id : '', ex: w && w.ex ? JSON.parse(JSON.stringify(w.ex)) : [], keep: w && w.fl ? w.fl.slice() : [], orig: w && w.fl ? w.fl.slice() : [], pending: [], busy: false };
+    if (!form.ex.length) form.ex.push({ en: '', ru: '' });
+    openModal(
+      '<form id="wf" autocomplete="off" novalidate><h2>' + (w ? 'Слово' : 'Новое слово') + '</h2>' +
+      '<label>Английское слово<div class="row"><input type="text" id="f-en" class="grow" lang="en" autocapitalize="none" spellcheck="false" value="' + esc(w ? w.en : '') + '"><button type="button" class="icon-btn" data-act="speak-field" aria-label="Произнести">' + I.speaker + '</button></div></label>' +
+      '<div class="note" id="dup" hidden></div>' +
+      '<label>Транскрипция<input type="text" id="f-tr" autocapitalize="none" spellcheck="false" placeholder="например: ˈæp.əl" value="' + esc(w ? w.tr : '') + '"></label>' +
+      '<label>Перевод на русский<input type="text" id="f-ru" lang="ru" value="' + esc(w ? w.ru : '') + '"></label>' +
+      '<div class="sect"><div class="sect-h">Примеры</div><div id="exRows">' + exHTML() + '</div><button type="button" class="btn ghost" data-act="ex-add">' + I.plus + 'Добавить пример</button></div>' +
+      '<div class="sect"><div class="sect-h">Файлы</div><div id="attList">' + attHTML() + '</div>' + attPickHTML() + '</div>' +
+      '<div class="note err" id="f-err" hidden></div><div class="muted small" id="saveMsg"></div>' +
+      '<div class="actions">' + (w ? '<button type="button" class="btn danger left" data-act="del-word">' + I.trash + 'Удалить</button>' : '') +
+      '<button type="button" class="btn" data-act="modal-close">Отмена</button>' +
+      (w ? '' : '<button type="button" class="btn" data-act="save-more">Сохранить и добавить ещё</button>') +
+      '<button type="submit" class="btn primary" id="f-save">Сохранить</button></div></form>'
+    );
+    if (!w) { const e = $('#f-en'); if (e) e.focus(); } // сразу, без задержки: иначе фокус может «перехватить» уже начатый ввод в другом поле
+  }
+  function exHTML() {
+    return form.ex.map((e, i) =>
+      '<div class="ex-row" data-i="' + i + '"><input type="text" class="ex-en" lang="en" placeholder="Пример на английском" value="' + esc(e.en) + '">' +
+      '<div class="ex-btns"><button type="button" class="icon-btn" data-act="ex-speak" data-i="' + i + '" aria-label="Произнести пример">' + I.speaker + '</button>' +
+      '<button type="button" class="icon-btn" data-act="ex-del" data-i="' + i + '" aria-label="Убрать пример">' + I.trash + '</button></div>' +
+      '<input type="text" class="ex-ru" placeholder="Перевод примера" value="' + esc(e.ru) + '"></div>').join('');
+  }
+  function syncExFromDom() {
+    const rows = document.querySelectorAll('#exRows .ex-row');
+    if (rows.length) form.ex = Array.from(rows).map((r) => ({ en: $('.ex-en', r).value, ru: $('.ex-ru', r).value }));
+  }
+  function attHTML() {
+    let h = '';
+    for (const fid of form.keep) {
+      const f = core.get('files', fid);
+      if (!f || f.d) continue;
+      h += '<div class="file-chip"><button type="button" class="nm" data-act="open-file" data-id="' + esc(fid) + '">' + esc(f.name) + '</button><span class="muted small">' + fmtSize(f.size) +
+        '</span><button type="button" class="icon-btn plain" data-act="att-del" data-id="' + esc(fid) + '" aria-label="Убрать файл">' + I.trash + '</button></div>';
+    }
+    form.pending.forEach((f, i) => {
+      h += '<div class="file-chip"><span class="nm">' + esc(f.name) + ' <span class="muted small">(будет загружен)</span></span><span class="muted small">' + fmtSize(f.size) +
+        '</span><button type="button" class="icon-btn plain" data-act="pend-del" data-i="' + i + '" aria-label="Убрать файл">' + I.trash + '</button></div>';
+    });
+    return h || '<div class="muted small" style="margin-bottom:8px">Файлов нет. Можно прикрепить картинку, аудио или видео.</div>';
+  }
+  function attPickHTML() {
+    if (!M.signedIn) return '<div class="note info">Чтобы прикреплять файлы, войдите в Google (раздел «Ещё»). Файлы хранятся в вашем Google Drive.</div>';
+    return '<button type="button" class="btn" data-act="att-pick">' + I.clip + 'Прикрепить файл</button><input type="file" id="f-files" multiple hidden>';
+  }
+  const normEn = (s) => csv.norm(s);
+  function checkDup() {
+    const en = $('#f-en');
+    const box = $('#dup');
+    if (!en || !box) return;
+    const key = normEn(en.value);
+    const d = key && liveWords().find((w) => normEn(w.en) === key && w.id !== form.id);
+    box.hidden = !d;
+    if (d) box.textContent = 'Такое слово уже есть: «' + d.en + '» — ' + d.ru;
+  }
+  function showFormErr(msg) {
+    const e = $('#f-err');
+    if (!e) return;
+    e.hidden = !msg; e.textContent = msg || '';
+  }
+
+  async function saveWord(addMore) {
+    if (!form || form.busy) return;
+    syncExFromDom();
+    const en = $('#f-en').value.trim(), ru = $('#f-ru').value.trim();
+    const tr = $('#f-tr').value.trim().replace(/^[\[\/]+/, '').replace(/[\]\/]+$/, '').trim();
+    showFormErr('');
+    if (!en) { showFormErr('Введите английское слово'); $('#f-en').focus(); return; }
+    if (!ru) { showFormErr('Введите перевод'); $('#f-ru').focus(); return; }
+    const dup = liveWords().find((w) => normEn(w.en) === normEn(en) && w.id !== form.id);
+    if (dup && !window.confirm('Слово «' + dup.en + '» уже есть. Всё равно сохранить?')) return;
+    const ex = form.ex.map((e) => ({ en: e.en.trim(), ru: e.ru.trim() })).filter((e) => e.en || e.ru);
+
+    const newFiles = [];
+    if (form.pending.length) {
+      if (!M.signedIn) { showFormErr('Чтобы прикреплять файлы, войдите в Google'); return; }
+      form.busy = true;
+      $('#f-save').disabled = true;
+      try {
+        if (!D.tokenValid()) await D.getToken();
+        for (let i = 0; i < form.pending.length; i++) {
+          const f = form.pending[i];
+          const msg = $('#saveMsg');
+          const upd = (p) => { if (msg) msg.innerHTML = 'Загрузка файла ' + (i + 1) + ' из ' + form.pending.length + ': ' + Math.round(p * 100) + '%<div class="progress"><i style="width:' + Math.round(p * 100) + '%"></i></div>'; };
+          upd(0);
+          const r = await D.uploadAttachment(f, upd);
+          const rec = core.upsert('files', { id: core.uid(), name: f.name, mime: f.type || 'application/octet-stream', size: f.size, driveId: r.driveId });
+          newFiles.push(rec);
+        }
+      } catch (e) {
+        for (const rec of newFiles) core.tomb('files', rec.id, { driveId: rec.driveId });
+        if (newFiles.length) core.commit();
+        form.busy = false;
+        const b = $('#f-save'); if (b) b.disabled = false;
+        const m = $('#saveMsg'); if (m) m.textContent = '';
+        showFormErr('Не удалось загрузить файл: ' + (e.message || 'ошибка') + '. Слово не сохранено.');
+        return;
+      }
+    }
+    const now = Date.now();
+    const old = form.id ? getWord(form.id) : null;
+    const w = Object.assign({}, old || { id: core.uid(), c: now }, { en, ru, tr, ex, fl: form.keep.concat(newFiles.map((r) => r.id)) });
+    // убранные вложения помечаем удалёнными (с driveId, чтобы стереть их на Drive)
+    for (const fid of form.orig) {
+      if (!form.keep.includes(fid)) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
+    }
+    core.upsert('words', w);
+    core.commit();
+    form.busy = false;
+    closeModal();
+    toast(old ? 'Сохранено' : 'Слово добавлено');
+    if (addMore) openWordForm();
+  }
+  function deleteWord() {
+    if (!form || !form.id) return;
+    const w = getWord(form.id);
+    if (!w) return;
+    if (!window.confirm('Удалить слово «' + w.en + '»?')) return;
+    for (const fid of w.fl || []) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
+    core.tomb('words', w.id);
+    core.commit();
+    closeModal();
+    toast('Слово удалено');
+  }
+
+  /* ---------- файлы ---------- */
+  async function openFile(id) {
+    const rec = core.get('files', id);
+    if (!rec || rec.d) return;
+    closeViewer();
+    $('#viewer-root').innerHTML = '<div class="overlay" data-act="viewer-bg"><div class="sheet wide" role="dialog" aria-modal="true"><h2>' + esc(rec.name) + '</h2><div class="viewer" id="viewer"><div class="muted">Загрузка…</div><div class="progress"><i id="vp"></i></div></div><div class="actions"><button class="btn" data-act="viewer-close">Закрыть</button></div></div></div>';
+    try {
+      const blob = await D.getFileBlob(rec, (p) => { const e = $('#vp'); if (e) e.style.width = Math.round(p * 100) + '%'; });
+      if (!$('#viewer')) return;
+      viewerUrl = URL.createObjectURL(blob);
+      const m = (rec.mime || blob.type || '').toLowerCase();
+      let h;
+      if (m.startsWith('image/')) h = '<img src="' + viewerUrl + '" alt="' + esc(rec.name) + '">';
+      else if (m.startsWith('audio/')) h = '<audio controls autoplay src="' + viewerUrl + '"></audio>';
+      else if (m.startsWith('video/')) h = '<video controls playsinline src="' + viewerUrl + '"></video>';
+      else if (m === 'application/pdf') h = '<iframe src="' + viewerUrl + '" title="' + esc(rec.name) + '"></iframe>';
+      else h = '<div class="muted">Предпросмотр недоступен.</div>';
+      h += '<div class="row wrap" style="justify-content:center;margin-top:12px"><a class="btn" href="' + viewerUrl + '" download="' + esc(rec.name) + '">Скачать (' + fmtSize(rec.size) + ')</a>';
+      if (blob.size > D.AUTO_CACHE_MAX && !(await D.isCached(rec))) h += '<button class="btn" data-act="cache-file" data-id="' + esc(id) + '">Хранить на устройстве</button>';
+      h += '</div>';
+      $('#viewer').innerHTML = h;
+    } catch (e) {
+      const v = $('#viewer');
+      if (v) v.innerHTML = '<div class="note err">' + esc(e.message || 'Не удалось открыть файл') + '</div>';
+    }
+  }
+  async function cacheFile(id) {
+    const rec = core.get('files', id);
+    if (!rec) return;
+    try { const blob = await D.getFileBlob(rec, null, true); await D.cacheFile(rec, blob); toast('Файл сохранён на устройстве'); } catch (e) { toast(e.message || 'Не удалось сохранить'); }
+  }
+
+  /* ---------- импорт CSV ---------- */
+  function openImport() {
+    imp = { parsed: null };
+    openModal(
+      '<h2>Импорт слов из CSV</h2>' +
+      '<p class="muted small">Колонки: <b>en, ru, transcription, example_en, example_ru</b>. Первая строка — заголовок (необязательно). Подходят разделители «;», «,» и табуляция, кодировка UTF-8 или Windows-1251. Несколько примеров в одной ячейке разделяйте « | ».</p>' +
+      '<div class="row wrap" style="margin-bottom:12px"><button class="btn primary" data-act="imp-pick">Выбрать файл</button><button class="btn" data-act="tpl">Скачать образец</button></div>' +
+      '<input type="file" id="imp-file" accept=".csv,.txt,text/csv,text/plain" hidden>' +
+      '<div class="sect"><div class="sect-h">Или вставьте текст</div><textarea id="imp-text" placeholder="apple;яблоко;ˈæp.əl;I eat an apple.;Я ем яблоко."></textarea><div style="margin-top:8px"><button class="btn" data-act="imp-parse">Проверить</button></div></div>' +
+      '<div id="imp-prev"></div><div class="actions"><button class="btn" data-act="modal-close">Закрыть</button></div>', 'wide'
+    );
+  }
+  function parseImport(text) {
+    const p = csv.parse(text);
+    imp.parsed = p;
+    const map = new Map(liveWords().map((w) => [normEn(w.en), w]));
+    const dups = p.rows.filter((r) => map.has(normEn(r.en))).length;
+    imp.dups = dups;
+    let h = '';
+    if (!p.rows.length) {
+      h = '<div class="note err">Не нашёл ни одной строки со словом и переводом.' + (p.errors.length ? ' Например: ' + esc(p.errors[0].msg) : '') + '</div>';
+    } else {
+      h += '<div class="note info">Найдено слов: <b>' + p.rows.length + '</b> (новых: ' + (p.rows.length - dups) + ', уже есть: ' + dups + ')' + (p.errors.length ? ', пропущено строк с ошибками: ' + p.errors.length : '') +
+        (p.swappedRows ? '. В строках, где русский и английский были наоборот, поменял их местами: ' + p.swappedRows : '') + '.</div>';
+      h += '<table class="prev"><tr><th>Английский</th><th>Транскрипция</th><th>Русский</th></tr>' +
+        p.rows.slice(0, 6).map((r) => '<tr><td>' + esc(r.en) + '</td><td>' + esc(r.tr) + '</td><td>' + esc(r.ru) + '</td></tr>').join('') + '</table>';
+      if (p.rows.length > 6) h += '<div class="muted small" style="margin-bottom:8px">…и ещё ' + (p.rows.length - 6) + '</div>';
+      if (dups) h += '<label>Если слово уже есть<select id="imp-mode"><option value="skip">Пропустить</option><option value="update">Обновить перевод, транскрипцию и примеры (прогресс сохранится)</option></select></label>';
+      h += '<button class="btn primary" data-act="imp-do">Импортировать ' + p.rows.length + '</button>';
+    }
+    if (p.errors.length) h += '<details style="margin-top:12px"><summary class="muted small">Строки с ошибками (' + p.errors.length + ')</summary><div class="small muted">' + p.errors.slice(0, 15).map((e) => 'Строка ' + e.line + ': ' + esc(e.msg)).join('<br>') + (p.errors.length > 15 ? '<br>…' : '') + '</div></details>';
+    $('#imp-prev').innerHTML = h;
+  }
+  function doImport() {
+    if (!imp || !imp.parsed) return;
+    const modeEl = $('#imp-mode');
+    const mode = modeEl ? modeEl.value : 'skip';
+    const map = new Map(liveWords().map((w) => [normEn(w.en), w]));
+    const now = Date.now();
+    let added = 0, updated = 0, skipped = 0;
+    imp.parsed.rows.forEach((r, i) => {
+      const ex = map.get(normEn(r.en));
+      if (!ex) {
+        const w = { id: core.uid(), en: r.en, ru: r.ru, tr: r.tr, ex: r.ex, fl: [], c: now + i / 1000, u: now };
+        core.S.words.push(w);
+        map.set(normEn(r.en), w);
+        added++;
+      } else if (mode === 'update') {
+        ex.ru = r.ru;
+        if (r.tr) ex.tr = r.tr;
+        if (r.ex.length) ex.ex = r.ex;
+        ex.u = now;
+        updated++;
+      } else skipped++;
+    });
+    core.commit();
+    closeModal();
+    toast('Добавлено: ' + added + (updated ? ', обновлено: ' + updated : '') + (skipped ? ', пропущено: ' + skipped : ''));
+  }
+
+  /* ---------- занятие ---------- */
+  function startStudy() {
+    study = { done: 0, correct: 0, cur: null, revealed: false, last: null };
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    document.body.classList.add('noscroll');
+    nextCard();
+  }
+  function nextCard() {
+    const r = srs.pickNext(core.S.words, opts());
+    if (!r.pick) study.cur = null;
+    else study.cur = { id: r.pick.w.id, k: r.pick.k, kind: r.kind, stats: r.stats };
+    study.revealed = false;
+    renderStudy();
+    if (study.cur && study.cur.k === 'f' && M.autoSpeak) speakText(r.pick.w.en);
+  }
+  function reveal() {
+    if (!study || !study.cur || study.revealed) return;
+    study.revealed = true;
+    renderStudy();
+    const w = getWord(study.cur.id);
+    if (w && study.cur.k === 'b' && M.autoSpeak) speakText(w.en);
+  }
+  function grade(g) {
+    if (!study || !study.cur || !study.revealed) return;
+    const cur = study.cur;
+    const w = getWord(cur.id);
+    if (!w) { nextCard(); return; }
+    const prev = w[cur.k] ? JSON.parse(JSON.stringify(w[cur.k])) : null;
+    w[cur.k] = srs.review(w[cur.k], g);
+    w.u = Date.now();
+    const dayId = 'd' + srs.dayNum();
+    const day = core.get('days', dayId) || { id: dayId, n: 0, c: 0 };
+    day.n++;
+    if (g >= 2) day.c++;
+    core.upsert('days', day);
+    study.last = { id: w.id, k: cur.k, prev, dayId, good: g >= 2, cur };
+    study.done++;
+    if (g >= 2) study.correct++;
+    core.commit();
+    nextCard();
+  }
+  function undo() {
+    if (!study || !study.last) return;
+    const l = study.last;
+    const w = getWord(l.id);
+    if (w) { if (l.prev) w[l.k] = l.prev; else delete w[l.k]; w.u = Date.now(); }
+    const day = core.get('days', l.dayId);
+    if (day) { day.n = Math.max(0, day.n - 1); if (l.good) day.c = Math.max(0, day.c - 1); core.upsert('days', day); }
+    study.done = Math.max(0, study.done - 1);
+    if (l.good) study.correct = Math.max(0, study.correct - 1);
+    study.last = null;
+    core.commit();
+    const r = srs.pickNext(core.S.words, opts());
+    study.cur = Object.assign({}, l.cur, { stats: r.stats });
+    study.revealed = false;
+    renderStudy();
+  }
+  function closeStudy() {
+    study = null;
+    tts.stop();
+    $('#study-root').innerHTML = '';
+    if (!$('#modal-root').innerHTML) document.body.classList.remove('noscroll');
+    render();
+  }
+  function renderStudy() {
+    const root = $('#study-root');
+    if (!study) { root.innerHTML = ''; return; }
+    const cur = study.cur;
+    let body = '', actions = '', left = 0;
+    if (!cur) {
+      body = '<div class="done"><h2>' + (study.done ? 'Занятие завершено' : 'Пока нечего повторять') + '</h2><p class="muted">' +
+        (study.done ? 'Пройдено карточек: ' + study.done + ', верно: ' + study.correct + '.' : 'Новые карточки появятся по расписанию.') + '</p><button class="btn primary" data-act="study-close" style="margin-top:12px">Готово</button></div>';
+    } else {
+      const w = getWord(cur.id);
+      const f = cur.k === 'f';
+      left = Math.max(1, cur.stats.learn + cur.stats.review + cur.stats.newLeft);
+      const kind = (f ? 'Английский → русский' : 'Русский → английский') + (cur.kind === 'new' ? ' <span class="badge new">новое</span>' : '');
+      body = '<div class="st-card"><div class="st-kind">' + kind + '</div>';
+      if (f) body += '<div class="st-line"><div class="st-word" lang="en">' + esc(w.en) + '</div><button class="icon-btn" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
+      else body += '<div class="st-word" lang="ru">' + esc(w.ru) + '</div>';
+      if (study.revealed) {
+        body += '<div class="st-sep"></div>';
+        if (f) body += '<div class="st-ans" lang="ru">' + esc(w.ru) + '</div>' + (w.tr ? '<div class="st-tr">[' + esc(w.tr) + ']</div>' : '');
+        else body += '<div class="st-line"><div class="st-ans" lang="en">' + esc(w.en) + '</div><button class="icon-btn" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>' + (w.tr ? '<div class="st-tr">[' + esc(w.tr) + ']</div>' : '');
+        const exs = (w.ex || []).filter((e) => e.en || e.ru);
+        if (exs.length) body += '<div class="st-ex">' + exs.map((e) => '<div><div class="en"><span lang="en">' + esc(e.en) + '</span>' + (e.en ? '<button class="icon-btn plain" style="width:36px;height:36px" data-act="speak" data-text="' + esc(e.en) + '" aria-label="Произнести пример">' + I.speaker + '</button>' : '') + '</div>' + (e.ru ? '<div class="ru">' + esc(e.ru) + '</div>' : '') + '</div>').join('') + '</div>';
+        const fl = (w.fl || []).map((id) => core.get('files', id)).filter((x) => x && !x.d);
+        if (fl.length) body += '<div class="st-files">' + fl.map((x) => '<button class="btn" data-act="open-file" data-id="' + esc(x.id) + '">' + I.clip + esc(x.name.length > 22 ? x.name.slice(0, 20) + '…' : x.name) + '</button>').join('') + '</div>';
+      }
+      body += '</div>';
+      if (!study.revealed) actions = '<button class="btn primary big" data-act="reveal">Показать ответ</button>';
+      else {
+        const pv = srs.preview(w[cur.k] || srs.blank());
+        const names = ['Снова', 'Трудно', 'Хорошо', 'Легко'];
+        actions = '<div class="grades">' + names.map((n, g) => '<button class="grade g' + g + '" data-act="grade" data-g="' + g + '">' + n + '<small>' + esc(pv[g]) + '</small></button>').join('') + '</div>';
+      }
+    }
+    root.innerHTML = '<div class="study" role="dialog" aria-label="Занятие"><div class="st-top"><button class="icon-btn plain" data-act="study-close" aria-label="Закрыть">' + I.close + '</button>' +
+      '<div class="st-prog">' + (cur ? 'Осталось: <b>' + left + '</b>' : '') + '</div><button class="icon-btn plain" data-act="undo" aria-label="Отменить последний ответ"' + (study.last ? '' : ' disabled style="opacity:.35"') + '>' + I.undo + '</button></div>' +
+      '<div class="st-body">' + body + '</div>' + (actions ? '<div class="st-actions">' + actions + '</div>' : '') + '</div>';
+  }
+
+  /* ---------- настройки ---------- */
+  function syncCardHTML() {
+    if (!M.signedIn) {
+      return '<h3>Синхронизация</h3><p class="muted small" style="margin-top:0">Сейчас слова хранятся только на этом устройстве. Войдите в Google, чтобы они появились на других устройствах и можно было прикреплять файлы. Данные лежат в скрытой папке приложения на вашем Google Drive; разработчик их не видит. Вход необязателен.</p>' +
+        '<button class="btn primary" data-act="signin">Войти через Google</button>';
+    }
+    const st = D.status;
+    const last = M.lastSync ? new Date(M.lastSync).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'ещё не было';
+    let line = 'Последняя синхронизация: ' + last;
+    if (st.k === 'sync') line = 'Синхронизация…';
+    if (st.k === 'authneeded' || st.k === 'offline' || st.k === 'error') line = st.msg || line;
+    return '<h3>Синхронизация</h3><p class="' + (st.k === 'ok' || st.k === 'sync' ? 'muted' : 'note') + ' small" style="margin-top:0">' + esc(line) + '</p>' +
+      '<div class="row wrap"><button class="btn primary" data-act="sync">Синхронизировать</button><button class="btn" data-act="signout">Выйти</button></div>';
+  }
+  function renderSettings() {
+    view.dataset.tab = 'settings';
+    const s = S().settings;
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
+    view.innerHTML =
+      '<div class="card" id="syncCard">' + syncCardHTML() + '</div>' +
+      (installEvt ? '<div class="card"><h3>Приложение</h3><p class="muted small" style="margin-top:0">Установите Eng word на устройство: откроется как обычное приложение и будет работать без интернета.</p><button class="btn primary" data-act="install">Установить</button></div>' : '') +
+      (ios ? '<div class="card"><h3>Установка на iPhone</h3><p class="muted small" style="margin:0">В Safari нажмите «Поделиться» и выберите «На экран Домой». Так приложение откроется отдельно и данные надёжнее сохранятся.</p></div>' : '') +
+      '<div class="card"><h3>Занятия</h3><p class="muted small" style="margin-top:0">Эти настройки одинаковы на всех ваших устройствах.</p>' +
+      '<label>Новых слов в день<input type="number" id="s-new" min="0" max="500" value="' + s.newPerDay + '"></label>' +
+      '<label class="check"><input type="checkbox" id="s-df"' + (s.dirs.f ? ' checked' : '') + '>Английский → русский</label>' +
+      '<label class="check"><input type="checkbox" id="s-db"' + (s.dirs.b ? ' checked' : '') + '>Русский → английский</label></div>' +
+      '<div class="card"><h3>Произношение</h3><p class="muted small" style="margin-top:0">Голоса берутся из вашего устройства, поэтому на телефоне и компьютере они могут отличаться.</p>' +
+      (tts.supported ? '' : '<div class="note err">Этот браузер не умеет озвучивать текст.</div>') +
+      '<label>Акцент<select id="s-accent"><option value="en-US">Американский</option><option value="en-GB">Британский</option></select></label>' +
+      '<label>Голос<select id="s-voice"></select></label>' +
+      '<label>Скорость: <span id="rate-v">' + M.rate.toFixed(2).replace('.', ',') + '</span><input type="range" id="s-rate" min="0.5" max="1.2" step="0.05" value="' + M.rate + '"></label>' +
+      '<label class="check"><input type="checkbox" id="s-auto"' + (M.autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
+      '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
+      '<div class="card" id="dataCard"></div>' +
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">Eng word · версия 1.0 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+    $('#s-accent').value = M.accent;
+    fillVoices();
+    refreshData();
+  }
+  function fillVoices() {
+    const sel = $('#s-voice');
+    if (!sel) return;
+    const list = tts.list();
+    sel.innerHTML = '<option value="">Подобрать автоматически</option>' + list.map((v) => '<option value="' + esc(v.voiceURI) + '">' + esc(v.name + ' (' + v.lang + ')') + '</option>').join('');
+    sel.value = M.voice && list.some((v) => v.voiceURI === M.voice) ? M.voice : '';
+  }
+  async function refreshData() {
+    const el = $('#dataCard');
+    if (!el) return;
+    const words = liveWords().length;
+    const files = core.live('files').length;
+    let extra = '';
+    try {
+      const st = await core.blobStats();
+      extra += '<div class="muted small">Файлов сохранено на устройстве: ' + st.n + ' (' + fmtSize(st.size) + ')</div>';
+      if (navigator.storage && navigator.storage.persisted) {
+        const p = await navigator.storage.persisted();
+        extra += '<div class="muted small">Защита хранилища от очистки браузером: ' + (p ? 'включена' : 'не включена') + '</div>';
+      }
+    } catch (e) { /* ignore */ }
+    if ($('#dataCard') !== el) return;
+    el.innerHTML = '<h3>Данные</h3><div class="muted small" style="margin-bottom:8px">Слов: ' + words + ' · вложений: ' + files + '</div>' + extra +
+      '<div class="row wrap" style="margin-top:12px"><button class="btn" data-act="export">Экспорт CSV</button><button class="btn" data-act="tpl">Образец CSV</button><button class="btn" data-act="clear-files">Очистить файлы на устройстве</button></div>' +
+      '<div style="margin-top:12px"><button class="btn danger" data-act="wipe">Стереть данные на этом устройстве</button></div>';
+  }
+  async function wipeLocal() {
+    if (!window.confirm('Стереть все слова, прогресс и файлы на этом устройстве?' + (M.signedIn ? ' Копия на Google Drive останется и вернётся при следующей синхронизации.' : ' Без входа в Google их нельзя будет вернуть.'))) return;
+    core.S = core.defaults();
+    M.dirty = false; M.rv = ''; M.lastSync = 0;
+    core.saveMeta();
+    await core.persist(true);
+    await core.blobClear().catch(() => {});
+    toast('Данные стёрты');
+    show('study');
+  }
+
+  /* ---------- события ---------- */
+  const actions = {
+    tab: (el) => show(el.dataset.tab),
+    chip: () => { if (!M.signedIn) show('settings'); else D.syncNow({ interactive: true }); },
+    add: () => openWordForm(),
+    edit: (el) => openWordForm(el.dataset.id),
+    speak: (el) => speakText(el.dataset.text),
+    more: () => { wordsUI.limit += 80; renderWordList(); },
+    'modal-close': () => closeModal(),
+    'viewer-close': () => closeViewer(),
+    'viewer-bg': (el, e) => { if (e.target === el) closeViewer(); },
+    'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
+    'speak-field': () => speakText($('#f-en').value),
+    'ex-add': () => { syncExFromDom(); form.ex.push({ en: '', ru: '' }); $('#exRows').innerHTML = exHTML(); const r = document.querySelectorAll('#exRows .ex-en'); r[r.length - 1].focus(); },
+    'ex-del': (el) => { syncExFromDom(); form.ex.splice(+el.dataset.i, 1); if (!form.ex.length) form.ex.push({ en: '', ru: '' }); $('#exRows').innerHTML = exHTML(); },
+    'ex-speak': (el) => { syncExFromDom(); speakText((form.ex[+el.dataset.i] || {}).en); },
+    'att-pick': () => { const i = $('#f-files'); i && i.click(); },
+    'att-del': (el) => { form.keep = form.keep.filter((x) => x !== el.dataset.id); $('#attList').innerHTML = attHTML(); },
+    'pend-del': (el) => { form.pending.splice(+el.dataset.i, 1); $('#attList').innerHTML = attHTML(); },
+    'save-more': () => saveWord(true),
+    'del-word': () => deleteWord(),
+    'open-file': (el) => openFile(el.dataset.id),
+    'cache-file': (el) => cacheFile(el.dataset.id),
+    import: () => openImport(),
+    'imp-pick': () => $('#imp-file').click(),
+    'imp-parse': () => parseImport($('#imp-text').value),
+    'imp-do': () => doImport(),
+    tpl: () => download('eng-word-template.csv', csv.TEMPLATE),
+    export: () => {
+      const ws = liveWords().sort((a, b) => (a.c || 0) - (b.c || 0));
+      if (!ws.length) { toast('Нет слов для экспорта'); return; }
+      download('eng-word-' + dateStr() + '.csv', csv.stringify(ws));
+    },
+    'study-start': () => startStudy(),
+    'study-close': () => closeStudy(),
+    reveal: () => reveal(),
+    grade: (el) => grade(+el.dataset.g),
+    undo: () => undo(),
+    signin: () => D.signIn().then(() => { if (tab === 'settings') renderSettings(); toast('Вы вошли в Google'); }).catch((e) => toast(e.message || 'Не удалось войти')),
+    sync: () => D.syncNow({ interactive: true }).then((ok) => { if (ok) toast('Синхронизировано'); }),
+    signout: () => { if (window.confirm('Выйти из Google? Слова останутся на этом устройстве.')) { D.signOut(); renderSettings(); } },
+    install: () => { if (installEvt) { installEvt.prompt(); installEvt = null; } },
+    'clear-files': async () => { if (window.confirm('Удалить скачанные файлы с этого устройства? Они останутся на Google Drive.')) { await core.blobClear().catch(() => {}); refreshData(); toast('Файлы очищены'); } },
+    wipe: () => wipeLocal(),
+  };
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const fn = actions[el.dataset.act];
+    if (fn) fn(el, e);
+  });
+  document.addEventListener('pointerdown', (e) => { if (e.target.closest && e.target.closest('[data-act="signin"]')) D.preload(); });
+  document.addEventListener('submit', (e) => { if (e.target.id === 'wf') { e.preventDefault(); saveWord(false); } });
+  document.addEventListener('input', (e) => {
+    const id = e.target.id;
+    if (id === 'w-q') { wordsUI.q = e.target.value; wordsUI.limit = 80; renderWordList(); }
+    else if (id === 'f-en') checkDup();
+    else if (id === 's-rate') { M.rate = +e.target.value; core.saveMeta(); $('#rate-v').textContent = M.rate.toFixed(2).replace('.', ','); }
+  });
+  document.addEventListener('change', (e) => {
+    const t = e.target, id = t.id;
+    if (id === 'w-f') { wordsUI.filter = t.value; wordsUI.limit = 80; renderWordList(); }
+    else if (id === 's-new') { const n = Math.max(0, Math.min(500, parseInt(t.value, 10) || 0)); t.value = n; core.setSettings({ newPerDay: n }); core.commit(); }
+    else if (id === 's-df' || id === 's-db') {
+      const f = $('#s-df').checked, b = $('#s-db').checked;
+      if (!f && !b) { t.checked = true; toast('Нужно оставить хотя бы одно направление'); return; }
+      core.setSettings({ dirs: { f, b } }); core.commit();
+    }
+    else if (id === 's-accent') { M.accent = t.value; M.voice = ''; core.saveMeta(); fillVoices(); }
+    else if (id === 's-voice') { M.voice = t.value; core.saveMeta(); }
+    else if (id === 's-auto') { M.autoSpeak = t.checked; core.saveMeta(); }
+    else if (id === 'f-files') {
+      for (const f of Array.from(t.files)) {
+        if (f.size > D.MAX_FILE) { showFormErr('Файл «' + f.name + '» больше ' + Math.round(D.MAX_FILE / 1048576) + ' МБ'); continue; }
+        form.pending.push(f);
+      }
+      t.value = '';
+      $('#attList').innerHTML = attHTML();
+    }
+    else if (id === 'imp-file') {
+      const f = t.files[0];
+      if (!f) return;
+      f.arrayBuffer().then((buf) => { const text = csv.decode(buf); $('#imp-text').value = text.length > 200000 ? '' : text; parseImport(text); });
+      t.value = '';
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { if ($('#viewer-root').innerHTML) closeViewer(); else if ($('#modal-root').innerHTML) closeModal(); else if (study) closeStudy(); return; }
+    if (!study || $('#modal-root').innerHTML || $('#viewer-root').innerHTML) return;
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.key === ' ' || e.key === 'Enter') {
+      // кнопка внутри экрана занятия нажмётся сама; фокус, оставшийся на кнопках под экраном, не должен перехватывать пробел
+      if (tag === 'button' && e.target.closest('#study-root')) return;
+      e.preventDefault();
+      if (!study.revealed) reveal(); else grade(2);
+    } else if (['1', '2', '3', '4'].includes(e.key)) { grade(+e.key - 1); }
+    else if (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы') { const w = study.cur && getWord(study.cur.id); if (w) speakText(w.en); }
+    else if (e.key === 'z' || e.key === 'я' || e.key === 'Backspace') { undo(); }
+  });
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (tab === 'settings' && !study) renderSettings(); });
+
+  /* ---------- запуск ---------- */
+  async function boot() {
+    await core.init();
+    core.hooks.changed = onChanged;
+    core.hooks.error = toast;
+    D.onstatus = () => { updateChip(); };
+    tts.onchange = fillVoices;
+    render();
+    D.start();
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* ignore */ }
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+    EW.ui = { show, render, openWordForm, startStudy, grade, reveal, toast };
+    EW.ready = true;
+    document.documentElement.dataset.ready = '1';
+  }
+  boot();
+})();

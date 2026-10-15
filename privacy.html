@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Политика конфиденциальности — Eng word</title>
+<meta name="robots" content="index,follow">
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --text:#0f172a; --muted:#5b6b82; --acc:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1220; --card:#131c2e; --text:#e8edf6; --muted:#9aa8bf; --acc:#60a5fa; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 48px; }
+  article { background:var(--card); border-radius:16px; padding:24px 20px; box-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 16px rgba(15,23,42,.06); }
+  h1 { font-size:1.6rem; margin:0 0 4px; } h2 { font-size:1.15rem; margin:24px 0 8px; }
+  p, li { margin:8px 0; } .muted { color:var(--muted); font-size:.9rem; } a { color:var(--acc); }
+</style>
+</head>
+<body>
+<main>
+<article>
+  <h1>Политика конфиденциальности</h1>
+  <p class="muted">Приложение «Eng word» · обновлено 15 октября 2026 г.</p>
+
+  <p>Eng word — это бесплатное веб-приложение для изучения английских слов. У него нет собственного сервера и базы данных. Всё, что вы вносите (слова, переводы, примеры, прогресс повторения, прикреплённые файлы), остаётся только у вас.</p>
+
+  <h2>Где хранятся данные</h2>
+  <ul>
+    <li><b>На вашем устройстве.</b> Слова и прогресс сохраняются в памяти браузера (IndexedDB и localStorage). Приложение работает и без входа в Google, тогда данные лежат только на этом устройстве.</li>
+    <li><b>В вашем Google Drive — по желанию.</b> Если вы войдёте через Google, приложение создаст в скрытой папке приложения (<i>appDataFolder</i>) вашего Google Drive один файл с данными и файлы-вложения. Эта папка не показывается в обычном интерфейсе Drive, и другие приложения не имеют к ней доступа.</li>
+  </ul>
+
+  <h2>Какие разрешения Google запрашивает приложение</h2>
+  <p>Только одно: <code>https://www.googleapis.com/auth/drive.appdata</code> — доступ к собственной скрытой папке приложения на Google Drive. Приложение <b>не видит</b> ваши остальные файлы на Drive, вашу почту, контакты и другие данные аккаунта Google.</p>
+
+  <h2>Что получает разработчик</h2>
+  <p>Ничего. Данные не отправляются разработчику или третьим лицам, не продаются, не используются для рекламы и не анализируются. В приложении нет аналитики, рекламных скриптов и трекеров. Обмен данными происходит только между вашим устройством и вашим Google Drive.</p>
+
+  <h2>Google API Services User Data Policy</h2>
+  <p>Использование и передача информации, полученной из API Google, соответствуют <a href="https://developers.google.com/terms/api-services-user-data-policy">Политике по пользовательским данным в API-сервисах Google</a>, включая требования ограниченного использования (Limited Use).</p>
+
+  <h2>Синтез речи</h2>
+  <p>Произношение слов выполняется встроенным синтезатором речи вашего браузера или операционной системы. Текст слов передаётся только ему; разработчик к этому не имеет отношения.</p>
+
+  <h2>Как удалить данные</h2>
+  <ul>
+    <li>В приложении: «Ещё» → «Стереть данные на этом устройстве».</li>
+    <li>Из Google Drive: откройте <a href="https://drive.google.com/drive/u/0/settings">настройки Google Drive</a> → «Управление приложениями» → Eng word → «Удалить скрытые данные приложения».</li>
+    <li>Отозвать доступ приложения можно в <a href="https://myaccount.google.com/permissions">настройках аккаунта Google</a>.</li>
+  </ul>
+
+  <h2>Связь</h2>
+  <p>Вопросы и замечания можно оставить на странице проекта: <a href="https://github.com/StanislavvDarin/engword/issues">github.com/StanislavvDarin/engword/issues</a>.</p>
+  <p class="muted"><a href="./">← Вернуться в приложение</a></p>
+</article>
+</main>
+</body>
+</html>

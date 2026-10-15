@@ -145,7 +145,7 @@
   }
 
   /* ---------- главная ---------- */
-  function opts() { return { dirs: S().settings.dirs, newPerDay: S().settings.newPerDay }; }
+  function opts() { const s = S().settings; return { dirs: s.dirs, newPerDay: s.newPerDay, maxDays: s.maxDays }; }
   function streak() {
     const m = new Map(S().days.filter((d) => !d.d).map((d) => [d.id, d]));
     let d = srs.dayNum();
@@ -153,15 +153,6 @@
     let s = 0;
     while (m.get('d' + d) && m.get('d' + d).n > 0) { s++; d--; }
     return s;
-  }
-  function masteredWords(words) {
-    const dirs = S().settings.dirs;
-    let n = 0;
-    for (const w of words) {
-      const ks = ['f', 'b'].filter((k) => dirs[k]);
-      if (ks.length && ks.every((k) => w[k] && w[k].st === srs.REVIEW && w[k].iv >= 21)) n++;
-    }
-    return n;
   }
   function renderHome() {
     view.dataset.tab = 'study';
@@ -191,7 +182,7 @@
       '<div class="stat accent"><b id="n-due">' + (st.learn + st.review) + '</b><span>повторить сейчас</span></div>' +
       '<div class="stat"><b id="n-new">' + st.newLeft + '</b><span>новых на сегодня</span></div>' +
       '<div class="stat"><b>' + st.total + '</b><span>всего слов</span></div>' +
-      '<div class="stat"><b>' + masteredWords(words) + '</b><span>прочно выучено</span></div></div>' +
+      '<div class="stat"><b>' + st.mastered + '</b><span>прочно выучено</span></div></div>' +
       '<button class="btn primary big" data-act="study-start"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Начать занятие' : 'На сегодня всё') + '</button>' +
       (todo ? '' : '<p class="muted small" style="text-align:center;margin:10px 0 0">Следующие карточки появятся по расписанию. Можно добавить новые слова.</p>') +
       '</div>' +
@@ -224,15 +215,16 @@
     let list = scopeWords();
     const total = list.length;
     if (q) list = list.filter((w) => w.en.toLowerCase().includes(q) || w.ru.toLowerCase().includes(q));
-    if (wordsUI.filter !== 'all') list = list.filter((w) => srs.wordState(w, now) === wordsUI.filter);
+    if (wordsUI.filter !== 'all') list = list.filter((w) => srs.wordState(w, now, opts()) === wordsUI.filter);
     list.sort((a, b) => (b.c || 0) - (a.c || 0));
     const shown = list.slice(0, wordsUI.limit);
     $('#wcount').textContent = total ? 'Слов: ' + total + (list.length !== total ? ' · найдено: ' + list.length : '') : '';
     $('#wlist').innerHTML = shown.length
       ? shown.map((w) => {
-          const s = srs.wordState(w, now);
+          const s = srs.wordState(w, now, opts());
+          const lv = srs.wordLevel(w, S().settings.dirs);
           return '<div class="wi" data-act="edit" data-id="' + esc(w.id) + '"><div class="wi-main"><div class="wi-en">' + esc(w.en) +
-            (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span></div><div class="wi-ru">' + esc(w.ru) + (many ? ' <span class="wi-dict">· ' + esc(dictName(rs(w))) + '</span>' : '') + '</div></div>' +
+            (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span>' + (lv ? '<span class="badge lvl">ур. ' + lv + '</span>' : '') + '</div><div class="wi-ru">' + esc(w.ru) + (many ? ' <span class="wi-dict">· ' + esc(dictName(rs(w))) + '</span>' : '') + '</div></div>' +
             '<button class="icon-btn plain" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
         }).join('')
       : '<div class="card empty-state" style="box-shadow:none"><p>' + (total ? 'Ничего не найдено.' : 'В этом словаре слов пока нет. Нажмите «Добавить» или загрузите CSV.') + '</p></div>';
@@ -270,6 +262,7 @@
       '<label>Транскрипция<input type="text" id="f-tr" autocapitalize="none" spellcheck="false" placeholder="например: ˈæp.əl" value="' + esc(w ? w.tr : '') + '"></label>' +
       '<label>Перевод на русский<input type="text" id="f-ru" lang="ru" value="' + esc(w ? w.ru : '') + '"></label>' +
       '<div class="sect"><div class="sect-h">Примеры</div><div id="exRows">' + exHTML() + '</div><button type="button" class="btn ghost" data-act="ex-add">' + I.plus + 'Добавить пример</button></div>' +
+      levelHTML(w) +
       '<div class="sect"><div class="sect-h">Файлы</div><div id="attList">' + attHTML() + '</div>' + attPickHTML() + '</div>' +
       '<div class="note err" id="f-err" hidden></div><div class="muted small" id="saveMsg"></div>' +
       '<div class="actions">' + (w ? '<button type="button" class="btn danger left" data-act="del-word">' + I.trash + 'Удалить</button>' : '') +
@@ -278,6 +271,17 @@
       '<button type="submit" class="btn primary" id="f-save">Сохранить</button></div></form>'
     );
     if (!w) { const e = $('#f-en'); if (e) e.focus(); } // сразу, без задержки: иначе фокус может «перехватить» уже начатый ввод в другом поле
+  }
+  function levelHTML(w) {
+    if (!w) return '';
+    const o = opts();
+    const row = (k, title) => {
+      const c = srs.norm(w[k]);
+      return '<label class="lv-row">' + title + '<span class="lv-in"><input type="number" id="lv-' + k + '" min="0" max="' + srs.maxLevel(srs.maxDaysOf(o)) + '" value="' + c.lv + '"><span class="muted small">' +
+        (c.lv === 0 && !c.pend ? 'ещё не изучалось' : (srs.fmtDue(w[k], Date.now(), o) ? 'повтор: ' + srs.fmtDue(w[k], Date.now(), o) : '')) + '</span></span></label>';
+    };
+    return '<div class="sect"><div class="sect-h">Уровень изучения</div><p class="muted small" style="margin-top:0">0 — слово ещё не изучено. 1–3 — повтор через 10 минут, 1 час, 6 часов; 4 — через сутки; дальше каждый уровень добавляет сутки. Уровень можно поменять вручную.</p>' +
+      row('f', 'Английский → русский') + row('b', 'Русский → английский') + '</div>';
   }
   function exHTML() {
     return form.ex.map((e, i) =>
@@ -369,6 +373,12 @@
     // убранные вложения помечаем удалёнными (с driveId, чтобы стереть их на Drive)
     for (const fid of form.orig) {
       if (!form.keep.includes(fid)) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
+    }
+    if (old) {
+      for (const k of ['f', 'b']) {
+        const el = $('#lv-' + k);
+        if (el && el.value !== '' && Math.round(+el.value) !== srs.level(old[k])) w[k] = srs.setLevel(w[k], +el.value, now, opts());
+      }
     }
     core.upsert('words', w);
     core.commit();
@@ -499,18 +509,19 @@
 
   /* ---------- занятие ---------- */
   function startStudy() {
-    study = { done: 0, correct: 0, cur: null, revealed: false, last: null, dict: curId() };
+    const dict = curId();
+    const q = srs.buildQueue(inScope(dict), opts());
+    study = { done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.body.classList.add('noscroll');
     nextCard();
   }
   function nextCard() {
-    const r = srs.pickNext(inScope(study.dict), opts());
-    if (!r.pick) study.cur = null;
-    else study.cur = { id: r.pick.w.id, k: r.pick.k, kind: r.kind, stats: r.stats };
+    while (study.queue.length && !getWord(study.queue[0].id)) study.queue.shift();
+    study.cur = study.queue.length ? Object.assign({}, study.queue[0]) : null;
     study.revealed = false;
     renderStudy();
-    if (study.cur && study.cur.k === 'f' && PR().autoSpeak) speakText(r.pick.w.en);
+    if (study.cur && study.cur.k === 'f' && PR().autoSpeak) speakText(getWord(study.cur.id).en);
   }
   function reveal() {
     if (!study || !study.cur || study.revealed) return;
@@ -519,22 +530,36 @@
     const w = getWord(study.cur.id);
     if (w && study.cur.k === 'b' && PR().autoSpeak) speakText(w.en);
   }
-  function grade(g) {
+  // know: true — «знаю», false — «не знаю»
+  function grade(know) {
     if (!study || !study.cur || !study.revealed) return;
     const cur = study.cur;
     const w = getWord(cur.id);
     if (!w) { nextCard(); return; }
+    const now = Date.now();
     const prev = w[cur.k] ? JSON.parse(JSON.stringify(w[cur.k])) : null;
-    w[cur.k] = srs.review(w[cur.k], g);
-    w.u = Date.now();
+    const queueBefore = study.queue.map((x) => Object.assign({}, x));
+    const wasNew = srs.isNew(srs.norm(w[cur.k]));
+    w[cur.k] = srs.answer(w[cur.k], know, now, opts());
+    w.u = now;
     const dayId = 'd' + srs.dayNum();
     const day = core.get('days', dayId) || { id: dayId, n: 0, c: 0 };
     day.n++;
-    if (g >= 2) day.c++;
+    if (know) day.c++;
     core.upsert('days', day);
-    study.last = { id: w.id, k: cur.k, prev, dayId, good: g >= 2, cur };
+    study.queue.shift();
+    if (w[cur.k].pend) {
+      // «не знаю»: слово вернётся через несколько карточек, пока не ответят «знаю»
+      study.queue.splice(Math.min(srs.GAP, study.queue.length), 0, { id: w.id, k: cur.k, kind: 'learn' });
+    } else if (wasNew && know) {
+      // новое слово оказалось знакомым — в занятие добавляется ещё одно новое
+      const inQ = new Set(study.queue.map((x) => x.id + ':' + x.k));
+      const more = srs.nextNew(inScope(study.dict), opts(), inQ);
+      if (more) study.queue.push(more);
+    }
+    study.last = { id: w.id, k: cur.k, prev, queue: queueBefore, dayId, good: know, cur };
     study.done++;
-    if (g >= 2) study.correct++;
+    if (know) study.correct++;
     core.commit();
     nextCard();
   }
@@ -547,10 +572,10 @@
     if (day) { day.n = Math.max(0, day.n - 1); if (l.good) day.c = Math.max(0, day.c - 1); core.upsert('days', day); }
     study.done = Math.max(0, study.done - 1);
     if (l.good) study.correct = Math.max(0, study.correct - 1);
+    study.queue = l.queue;
     study.last = null;
     core.commit();
-    const r = srs.pickNext(inScope(study.dict), opts());
-    study.cur = Object.assign({}, l.cur, { stats: r.stats });
+    study.cur = study.queue.length ? Object.assign({}, study.queue[0]) : null;
     study.revealed = false;
     renderStudy();
   }
@@ -572,8 +597,9 @@
     } else {
       const w = getWord(cur.id);
       const f = cur.k === 'f';
-      left = Math.max(1, cur.stats.learn + cur.stats.review + cur.stats.newLeft);
-      const kind = (f ? 'Английский → русский' : 'Русский → английский') + (cur.kind === 'new' ? ' <span class="badge new">новое</span>' : '');
+      left = study.queue.length;
+      const lvNow = srs.level(w[cur.k]);
+      const kind = (f ? 'Английский → русский' : 'Русский → английский') + (cur.kind === 'new' ? ' <span class="badge new">новое</span>' : '') + (cur.kind === 'learn' ? ' <span class="badge due">ещё раз</span>' : '') + (lvNow ? ' <span class="badge lvl">ур. ' + lvNow + '</span>' : '');
       body = '<div class="st-card"><div class="st-kind">' + kind + '</div>';
       if (f) body += '<div class="st-line"><div class="st-word" lang="en">' + esc(w.en) + '</div><button class="icon-btn" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
       else body += '<div class="st-word" lang="ru">' + esc(w.ru) + '</div>';
@@ -589,9 +615,9 @@
       body += '</div>';
       if (!study.revealed) actions = '<button class="btn primary big" data-act="reveal">Показать ответ</button>';
       else {
-        const pv = srs.preview(w[cur.k] || srs.blank());
-        const names = ['Снова', 'Трудно', 'Хорошо', 'Легко'];
-        actions = '<div class="grades">' + names.map((n, g) => '<button class="grade g' + g + '" data-act="grade" data-g="' + g + '">' + n + '<small>' + esc(pv[g]) + '</small></button>').join('') + '</div>';
+        const pv = srs.preview(w[cur.k], Date.now(), opts());
+        actions = '<div class="grades two"><button class="grade g0" data-act="grade" data-know="0">Не знаю<small>' + esc(pv.no) + '</small></button>' +
+          '<button class="grade g2" data-act="grade" data-know="1">Знаю<small>' + esc(pv.yes) + '</small></button></div>';
       }
     }
     root.innerHTML = '<div class="study" role="dialog" aria-label="Занятие"><div class="st-top"><button class="icon-btn plain" data-act="study-close" aria-label="Закрыть">' + I.close + '</button>' +
@@ -623,6 +649,8 @@
       (ios ? '<div class="card"><h3>Установка на iPhone</h3><p class="muted small" style="margin:0">В Safari нажмите «Поделиться» и выберите «На экран Домой». Так приложение откроется отдельно и данные надёжнее сохранятся.</p></div>' : '') +
       '<div class="card"><h3>Занятия</h3><p class="muted small" style="margin-top:0">Все настройки приложения переносятся на другие ваши устройства, если вы вошли в Google.</p>' +
       '<label>Новых слов в день<input type="number" id="s-new" min="0" max="500" value="' + s.newPerDay + '"></label>' +
+      '<label>Максимальный интервал повторения, суток<input type="number" id="s-max" min="2" max="3650" value="' + s.maxDays + '"></label>' +
+      '<p class="muted small" style="margin-top:-4px">Повторения идут через 10 минут, 1 час, 6 часов, 1, 2, 3 суток и так далее, каждый раз на сутки дольше, но не больше этого числа. Слово, о котором сразу ответили «знаю», в дневной лимит новых не входит.</p>' +
       '<label class="check"><input type="checkbox" id="s-df"' + (s.dirs.f ? ' checked' : '') + '>Английский → русский</label>' +
       '<label class="check"><input type="checkbox" id="s-db"' + (s.dirs.b ? ' checked' : '') + '>Русский → английский</label></div>' +
       '<div class="card"><h3>Произношение</h3><p class="muted small" style="margin-top:0">Настройки переносятся между устройствами. Сами голоса берутся из устройства, поэтому на телефоне и компьютере они могут отличаться: если выбранного голоса нет, подберётся подходящий.</p>' +
@@ -633,7 +661,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.2 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.3 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -787,7 +815,7 @@
           t.ex = unionEx(t.ex, s.ex);
           t.fl = unionIds(t.fl, s.fl);
           if (!t.tr && s.tr) t.tr = s.tr;
-          for (const c of ['f', 'b']) if (s[c] && (!t[c] || (s[c].reps || 0) > (t[c].reps || 0))) t[c] = s[c];
+          for (const c of ['f', 'b']) if (s[c] && (!t[c] || srs.level(s[c]) > srs.level(t[c]))) t[c] = s[c];
           t.u = now;
           core.tomb('words', s.id);
         }
@@ -897,7 +925,7 @@
     'study-start': () => startStudy(),
     'study-close': () => closeStudy(),
     reveal: () => reveal(),
-    grade: (el) => grade(+el.dataset.g),
+    grade: (el) => grade(el.dataset.know === '1'),
     undo: () => undo(),
     signin: () => D.signIn().then(() => { if (tab === 'settings') renderSettings(); toast('Вы вошли в Google'); }).catch((e) => toast(e.message || 'Не удалось войти')),
     sync: () => D.syncNow({ interactive: true }).then((ok) => { if (ok) toast('Синхронизировано'); }),
@@ -935,6 +963,7 @@
     else if (id === 'mg-dst') { dm.dst = t.value; renderDm(); }
     else if (id === 'mg-pol') { dm.pol = t.value; renderDm(); }
     else if (id === 's-new') { const n = Math.max(0, Math.min(500, parseInt(t.value, 10) || 0)); t.value = n; core.setSettings({ newPerDay: n }); core.commit(); }
+    else if (id === 's-max') { const n = Math.max(2, Math.min(3650, parseInt(t.value, 10) || srs.DEFAULT_MAX_DAYS)); t.value = n; core.setSettings({ maxDays: n }); core.commit(); }
     else if (id === 's-df' || id === 's-db') {
       const f = $('#s-df').checked, b = $('#s-db').checked;
       if (!f && !b) { t.checked = true; toast('Нужно оставить хотя бы одно направление'); return; }
@@ -968,8 +997,9 @@
       // кнопка внутри экрана занятия нажмётся сама; фокус, оставшийся на кнопках под экраном, не должен перехватывать пробел
       if (tag === 'button' && e.target.closest('#study-root')) return;
       e.preventDefault();
-      if (!study.revealed) reveal(); else grade(2);
-    } else if (['1', '2', '3', '4'].includes(e.key)) { grade(+e.key - 1); }
+      if (!study.revealed) reveal(); else grade(true);
+    } else if (e.key === '1') { grade(false); }
+    else if (e.key === '2') { grade(true); }
     else if (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы') { const w = study.cur && getWord(study.cur.id); if (w) speakText(w.en); }
     else if (e.key === 'z' || e.key === 'я' || e.key === 'Backspace') { undo(); }
   });

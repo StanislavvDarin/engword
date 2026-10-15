@@ -9,7 +9,7 @@
   const TOMB_TTL = 90 * 864e5;
 
   function defaults() {
-    return { v: 1, settings: { u: 0, ts: {}, newPerDay: 10, dirs: { f: true, b: true }, accent: 'en-US', voice: '', rate: 0.9, autoSpeak: true, cur: '' }, words: [], files: [], days: [], dicts: [] };
+    return { v: 1, settings: { u: 0, ts: {}, newPerDay: 10, dirs: { f: true, b: true }, maxDays: 60, accent: 'en-US', voice: '', rate: 0.9, autoSpeak: true, cur: '' }, words: [], files: [], days: [], dicts: [] };
   }
   function normalize(s) {
     const d = defaults();

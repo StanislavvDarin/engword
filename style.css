@@ -219,3 +219,11 @@ details.dups { margin-bottom: 12px; }
   .brand-name { white-space: nowrap; font-size: .95rem; }
   .chip { font-size: .75rem; padding: 6px 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+/* ---------- уровни ---------- */
+.grades.two { grid-template-columns: 1fr 1fr; }
+.grades.two .grade { min-height: 72px; font-size: 1.05rem; }
+.badge.lvl { background: var(--bg); color: var(--muted); }
+.lv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lv-in { display: flex; align-items: center; gap: 10px; }
+.lv-in input { width: 84px; }

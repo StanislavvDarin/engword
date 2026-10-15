@@ -92,7 +92,9 @@
     if (!tts.supported) { toast('Этот браузер не умеет озвучивать текст'); return; }
     if (!text) return;
     tts.speak(text, { accent: PR().accent, voice: PR().voice, rate: PR().rate }).then((ok) => {
-      if (!ok && !tts.list().length) toast('На устройстве нет английского голоса. Установите его в настройках синтеза речи');
+      if (ok) return;
+      if (!tts.list().length) toast('На устройстве нет английского голоса. Установите его: Настройки → Универсальный доступ → Устный контент → Голоса');
+      else if (tts.state.lastError) toast('Не удалось озвучить. На iPhone проверьте, что выключен беззвучный режим (переключатель сбоку) и включён звук.');
     });
   }
   function download(name, text, type) {
@@ -724,6 +726,7 @@
       return '<div class="di"><div class="di-main"><div class="di-name">' + esc(d.name) + (d.id === cur ? '<span class="badge new">выбран</span>' : '') + '</div><div class="muted small">' + wordsWord(n[d.id] || 0) + '</div></div>' +
         '<div class="di-btns">' + (d.id === cur ? '' : '<button type="button" class="btn" data-act="dm-pick" data-id="' + esc(d.id) + '">Открыть</button>') +
         '<button type="button" class="btn" data-act="dm-ren" data-id="' + esc(d.id) + '">Переименовать</button>' +
+        '<button type="button" class="btn" data-act="dm-reset" data-id="' + esc(d.id) + '">Сбросить прогресс</button>' +
         (ds.length > 1 ? '<button type="button" class="btn" data-act="dm-mergefrom" data-id="' + esc(d.id) + '">Слить в…</button>' : '') +
         '<button type="button" class="btn danger" data-act="dm-del" data-id="' + esc(d.id) + '"' + (ds.length > 1 ? '' : ' disabled') + '>' + I.trash + 'Удалить</button></div></div>';
     }).join('');
@@ -774,6 +777,20 @@
     toast('Словарь удалён');
   }
 
+  // Сброс прогресса: все слова словаря снова становятся новыми (уровень 0). Сами слова, примеры и файлы остаются.
+  function resetDict(id) {
+    const d = core.get('dicts', id);
+    if (!d || d.d) return;
+    const ws = wordsOfDict(id);
+    const started = ws.filter((w) => w.f || w.b);
+    if (!started.length) { toast('В словаре «' + d.name + '» прогресса нет'); return; }
+    if (!window.confirm('Сбросить прогресс в словаре «' + d.name + '»? У ' + started.length + ' слов уровень изучения станет нулевым, и они будут изучаться заново. Сами слова останутся. Отменить это будет нельзя.')) return;
+    const now = Date.now();
+    for (const w of started) { delete w.f; delete w.b; w.u = now; }
+    core.commit();
+    renderDm();
+    toast('Прогресс сброшен: ' + started.length + ' слов');
+  }
   const unionIds = (a, b) => Array.from(new Set((a || []).concat(b || [])));
   function unionEx(a, b) {
     const out = (a || []).slice();
@@ -887,6 +904,7 @@
     'dm-ren': (el) => { dm.edit = el.dataset.id; renderDm(); const i = $('#dm-ren'); if (i) { i.focus(); i.select(); } },
     'dm-ren-cancel': () => { dm.edit = ''; renderDm(); },
     'dm-del': (el) => deleteDict(el.dataset.id),
+    'dm-reset': (el) => resetDict(el.dataset.id),
     'dm-merge': () => { dm.v = 'merge'; renderDm(); },
     'dm-mergefrom': (el) => { dm.v = 'merge'; dm.src = el.dataset.id; dm.dst = ''; renderDm(); },
     'dm-check': () => { dm.v = 'check'; renderDm(); },

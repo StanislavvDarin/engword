@@ -3,13 +3,13 @@
   'use strict';
   const EW = (window.EW = window.EW || {});
 
-  const COLLS = ['words', 'files', 'days'];
+  const COLLS = ['words', 'files', 'days', 'dicts'];
   const LS_META = 'ew.meta.v1';
   const LS_STATE = 'ew.state.v1'; // запасной вариант, если IndexedDB недоступна
   const TOMB_TTL = 90 * 864e5;
 
   function defaults() {
-    return { v: 1, settings: { u: 0, newPerDay: 10, dirs: { f: true, b: true } }, words: [], files: [], days: [] };
+    return { v: 1, settings: { u: 0, newPerDay: 10, dirs: { f: true, b: true } }, words: [], files: [], days: [], dicts: [] };
   }
   function normalize(s) {
     const d = defaults();
@@ -18,10 +18,19 @@
     s.settings = Object.assign({}, d.settings, s.settings || {});
     s.settings.dirs = Object.assign({}, d.settings.dirs, s.settings.dirs || {});
     for (const c of COLLS) if (!Array.isArray(s[c])) s[c] = [];
+    ensureDicts(s);
     return s;
   }
+  // Всегда должен быть хотя бы один словарь. «Основной» создаётся с u = 0: любая настоящая запись с другого устройства его перекроет.
+  function ensureDicts(s) {
+    if (s.dicts.some((d) => !d.d)) return false;
+    const i = s.dicts.findIndex((d) => d.id === 'main');
+    const m = { id: 'main', name: 'Основной', c: 0, u: i >= 0 ? (s.dicts[i].u || 0) + 1 : 0 };
+    if (i >= 0) s.dicts[i] = m; else s.dicts.push(m);
+    return true;
+  }
 
-  const metaDefaults = { signedIn: false, dirty: false, lastSync: 0, rv: '', voice: '', accent: 'en-US', rate: 0.9, autoSpeak: true };
+  const metaDefaults = { signedIn: false, dirty: false, lastSync: 0, rv: '', voice: '', cur: '', accent: 'en-US', rate: 0.9, autoSpeak: true };
   function loadMeta() {
     try { return Object.assign({}, metaDefaults, JSON.parse(localStorage.getItem(LS_META) || '{}')); } catch (e) { return Object.assign({}, metaDefaults); }
   }
@@ -138,6 +147,14 @@
   /* ---------- утилиты ---------- */
   core.uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 9);
   core.live = (c) => core.S[c].filter((x) => !x.d);
+  // К какому словарю относится слово. Слова без словаря (старые данные) и слова удалённого словаря попадают в «Основной».
+  core.dictResolver = function () {
+    const ds = core.S.dicts.filter((d) => !d.d);
+    const ok = new Set(ds.map((d) => d.id));
+    const fb = ok.has('main') ? 'main' : ds.length ? ds[0].id : 'main';
+    return (w) => (w.dict && ok.has(w.dict) ? w.dict : fb);
+  };
+  core.dictId = (w) => core.dictResolver()(w);
   core.get = (c, id) => core.S[c].find((x) => x.id === id);
   core.upsert = function (c, obj) {
     obj.u = Date.now();
@@ -181,6 +198,7 @@
       }
       L[c] = [...lm.values()].filter((x) => !(x.d && !x.driveId && now - (x.u || 0) > TOMB_TTL));
     }
+    if (ensureDicts(L)) pushNeeded = true;
     const ru = (R.settings && R.settings.u) || 0;
     const lu = L.settings.u || 0;
     if (ru > lu) { L.settings = Object.assign({}, defaults().settings, R.settings); pullChanged = true; }
@@ -189,5 +207,6 @@
   };
 
   core.normalize = normalize;
+  core.ensureDicts = ensureDicts;
   core.defaults = defaults;
 })();

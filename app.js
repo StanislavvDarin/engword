@@ -21,6 +21,7 @@
   let study = null;
   let form = null;
   let imp = null;
+  let dm = null;
   const wordsUI = { q: '', filter: 'all', limit: 80 };
   let viewerUrl = '';
   let installEvt = null;
@@ -29,6 +30,47 @@
   const S = () => core.S;
   const getWord = (id) => { const w = core.get('words', id); return w && !w.d ? w : null; };
   const liveWords = () => core.live('words');
+  /* ---------- словари ---------- */
+  const liveDicts = () => core.live('dicts').sort((a, b) => (a.c || 0) - (b.c || 0) || a.name.localeCompare(b.name, 'ru'));
+  const dictName = (id) => { const d = core.get('dicts', id); return d && !d.d ? d.name : '—'; };
+  function curId() {
+    const ds = core.live('dicts');
+    if (M.cur === 'all' && ds.length > 1) return 'all';
+    if (ds.some((d) => d.id === M.cur)) return M.cur;
+    return (ds.find((d) => d.id === 'main') || ds[0] || { id: 'main' }).id;
+  }
+  function setCur(id) { M.cur = id; core.saveMeta(); }
+  function inScope(sc) {
+    const all = liveWords();
+    if (sc === 'all') return all;
+    const r = core.dictResolver();
+    return all.filter((w) => r(w) === sc);
+  }
+  const scopeWords = () => inScope(curId());
+  const scopeLabel = (sc) => (sc === 'all' ? 'Все словари' : dictName(sc));
+  function dictCounts() {
+    const r = core.dictResolver(), n = {};
+    let all = 0;
+    for (const w of liveWords()) { const id = r(w); n[id] = (n[id] || 0) + 1; all++; }
+    n.all = all;
+    return n;
+  }
+  function dictBarHTML() {
+    const ds = liveDicts(), cur = curId(), n = dictCounts();
+    return '<div class="dictbar"><select id="d-sel" aria-label="Словарь">' +
+      ds.map((d) => '<option value="' + esc(d.id) + '"' + (d.id === cur ? ' selected' : '') + '>' + esc(d.name) + ' (' + (n[d.id] || 0) + ')</option>').join('') +
+      (ds.length > 1 ? '<option value="all"' + (cur === 'all' ? ' selected' : '') + '>Все словари (' + n.all + ')</option>' : '') +
+      '</select><button type="button" class="btn" data-act="dicts">Словари</button></div>';
+  }
+  const dictOptions = (sel) => liveDicts().map((d) => '<option value="' + esc(d.id) + '"' + (d.id === sel ? ' selected' : '') + '>' + esc(d.name) + '</option>').join('');
+  function wordsOfDict(id) { return inScope(id); }
+  function dictNameError(name, exceptId) {
+    name = (name || '').trim();
+    if (!name) return 'Введите название словаря';
+    if (name.length > 40) return 'Название не длиннее 40 символов';
+    if (liveDicts().some((d) => d.id !== exceptId && d.name.trim().toLowerCase() === name.toLowerCase())) return 'Словарь с таким названием уже есть';
+    return '';
+  }
   function fmtSize(b) {
     b = +b || 0;
     if (b < 1024) return b + ' Б';
@@ -120,10 +162,13 @@
   }
   function renderHome() {
     view.dataset.tab = 'study';
-    const words = liveWords();
+    const words = scopeWords();
+    const bar = dictBarHTML();
     if (!words.length) {
-      view.innerHTML =
-        '<div class="card empty-state"><h2>Начнём учить слова</h2><p>Добавьте первое слово или загрузите сразу много из CSV-файла. Приложение само подскажет, когда повторять каждое слово.</p>' +
+      const sc = curId();
+      const some = liveWords().length > 0;
+      view.innerHTML = bar +
+        '<div class="card empty-state"><h2>' + (some ? 'В этом словаре пока нет слов' : 'Начнём учить слова') + '</h2><p>' + (some ? 'Добавьте слово или загрузите слова из CSV-файла в словарь «' + esc(scopeLabel(sc)) + '». Можно выбрать другой словарь вверху.' : 'Добавьте первое слово или загрузите сразу много из CSV-файла. Приложение само подскажет, когда повторять каждое слово.') + '</p>' +
         '<div class="row wrap" style="justify-content:center"><button class="btn primary" data-act="add">' + I.plus + 'Добавить слово</button><button class="btn" data-act="import">Импорт из CSV</button></div></div>';
       return;
     }
@@ -138,7 +183,7 @@
     const max = Math.max(1, ...days.map((d) => d.n));
     const todayN = days[6].n;
     const sk = streak();
-    view.innerHTML =
+    view.innerHTML = bar +
       '<div class="card"><div class="stat-grid">' +
       '<div class="stat accent"><b id="n-due">' + (st.learn + st.review) + '</b><span>повторить сейчас</span></div>' +
       '<div class="stat"><b id="n-new">' + st.newLeft + '</b><span>новых на сегодня</span></div>' +
@@ -157,18 +202,23 @@
     if (view.dataset.tab !== 'words') {
       view.dataset.tab = 'words';
       view.innerHTML =
-        '<div class="toolbar"><input type="search" id="w-q" class="grow" placeholder="Поиск по словам" value="' + esc(wordsUI.q) + '" aria-label="Поиск">' +
+        '<div id="dictbar"></div><div class="toolbar"><input type="search" id="w-q" class="grow" placeholder="Поиск по словам" value="' + esc(wordsUI.q) + '" aria-label="Поиск">' +
         '<select id="w-f" aria-label="Фильтр" style="width:auto"><option value="all">Все</option><option value="new">Новые</option><option value="due">К повторению</option><option value="learning">Учатся</option><option value="review">Выучиваются</option></select></div>' +
         '<div class="toolbar"><button class="btn primary" data-act="add">' + I.plus + 'Добавить</button><button class="btn" data-act="import">Импорт</button><button class="btn" data-act="export">Экспорт</button></div>' +
         '<div class="muted small" id="wcount" style="margin-bottom:8px"></div><div class="wlist" id="wlist"></div><div class="more" id="wmore"></div>';
       $('#w-f').value = wordsUI.filter;
     }
+    const bh = dictBarHTML(), bar = $('#dictbar');
+    if (bar && bar.dataset.h !== bh) { bar.innerHTML = bh; bar.dataset.h = bh; }
     renderWordList();
   }
   function renderWordList() {
     const q = wordsUI.q.trim().toLowerCase();
     const now = Date.now();
-    let list = liveWords();
+    const sc = curId();
+    const many = sc === 'all';
+    const rs = many ? core.dictResolver() : null;
+    let list = scopeWords();
     const total = list.length;
     if (q) list = list.filter((w) => w.en.toLowerCase().includes(q) || w.ru.toLowerCase().includes(q));
     if (wordsUI.filter !== 'all') list = list.filter((w) => srs.wordState(w, now) === wordsUI.filter);
@@ -179,10 +229,10 @@
       ? shown.map((w) => {
           const s = srs.wordState(w, now);
           return '<div class="wi" data-act="edit" data-id="' + esc(w.id) + '"><div class="wi-main"><div class="wi-en">' + esc(w.en) +
-            (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span></div><div class="wi-ru">' + esc(w.ru) + '</div></div>' +
+            (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span></div><div class="wi-ru">' + esc(w.ru) + (many ? ' <span class="wi-dict">· ' + esc(dictName(rs(w))) + '</span>' : '') + '</div></div>' +
             '<button class="icon-btn plain" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
         }).join('')
-      : '<div class="card empty-state" style="box-shadow:none"><p>' + (total ? 'Ничего не найдено.' : 'Слов пока нет. Нажмите «Добавить» или загрузите CSV.') + '</p></div>';
+      : '<div class="card empty-state" style="box-shadow:none"><p>' + (total ? 'Ничего не найдено.' : 'В этом словаре слов пока нет. Нажмите «Добавить» или загрузите CSV.') + '</p></div>';
     $('#wmore').innerHTML = list.length > shown.length ? '<button class="btn" data-act="more">Показать ещё (' + (list.length - shown.length) + ')</button>' : '';
   }
 
@@ -195,7 +245,7 @@
     if (form && form.busy) return;
     $('#modal-root').innerHTML = '';
     if (!study) document.body.classList.remove('noscroll');
-    form = null; imp = null;
+    form = null; imp = null; dm = null;
   }
   function closeViewer() {
     const r = $('#viewer-root');
@@ -206,12 +256,14 @@
   /* ---------- форма слова ---------- */
   function openWordForm(id) {
     const w = id ? getWord(id) : null;
-    form = { id: w ? w.id : '', ex: w && w.ex ? JSON.parse(JSON.stringify(w.ex)) : [], keep: w && w.fl ? w.fl.slice() : [], orig: w && w.fl ? w.fl.slice() : [], pending: [], busy: false };
+    const dsel = w ? core.dictId(w) : (curId() === 'all' ? core.dictId({}) : curId());
+    form = { id: w ? w.id : '', dict: dsel, ex: w && w.ex ? JSON.parse(JSON.stringify(w.ex)) : [], keep: w && w.fl ? w.fl.slice() : [], orig: w && w.fl ? w.fl.slice() : [], pending: [], busy: false };
     if (!form.ex.length) form.ex.push({ en: '', ru: '' });
     openModal(
       '<form id="wf" autocomplete="off" novalidate><h2>' + (w ? 'Слово' : 'Новое слово') + '</h2>' +
       '<label>Английское слово<div class="row"><input type="text" id="f-en" class="grow" lang="en" autocapitalize="none" spellcheck="false" value="' + esc(w ? w.en : '') + '"><button type="button" class="icon-btn" data-act="speak-field" aria-label="Произнести">' + I.speaker + '</button></div></label>' +
       '<div class="note" id="dup" hidden></div>' +
+      (liveDicts().length > 1 ? '<label>Словарь<select id="f-dict">' + dictOptions(dsel) + '</select></label>' : '') +
       '<label>Транскрипция<input type="text" id="f-tr" autocapitalize="none" spellcheck="false" placeholder="например: ˈæp.əl" value="' + esc(w ? w.tr : '') + '"></label>' +
       '<label>Перевод на русский<input type="text" id="f-ru" lang="ru" value="' + esc(w ? w.ru : '') + '"></label>' +
       '<div class="sect"><div class="sect-h">Примеры</div><div id="exRows">' + exHTML() + '</div><button type="button" class="btn ghost" data-act="ex-add">' + I.plus + 'Добавить пример</button></div>' +
@@ -254,14 +306,15 @@
     return '<button type="button" class="btn" data-act="att-pick">' + I.clip + 'Прикрепить файл</button><input type="file" id="f-files" multiple hidden>';
   }
   const normEn = (s) => csv.norm(s);
+  function formDict() { const e = $('#f-dict'); return e ? e.value : form.dict; }
   function checkDup() {
     const en = $('#f-en');
     const box = $('#dup');
     if (!en || !box) return;
     const key = normEn(en.value);
-    const d = key && liveWords().find((w) => normEn(w.en) === key && w.id !== form.id);
+    const d = key && wordsOfDict(formDict()).find((w) => normEn(w.en) === key && w.id !== form.id);
     box.hidden = !d;
-    if (d) box.textContent = 'Такое слово уже есть: «' + d.en + '» — ' + d.ru;
+    if (d) box.textContent = 'Такое слово уже есть' + (liveDicts().length > 1 ? ' в словаре «' + dictName(formDict()) + '»' : '') + ': «' + d.en + '» — ' + d.ru;
   }
   function showFormErr(msg) {
     const e = $('#f-err');
@@ -277,7 +330,7 @@
     showFormErr('');
     if (!en) { showFormErr('Введите английское слово'); $('#f-en').focus(); return; }
     if (!ru) { showFormErr('Введите перевод'); $('#f-ru').focus(); return; }
-    const dup = liveWords().find((w) => normEn(w.en) === normEn(en) && w.id !== form.id);
+    const dup = wordsOfDict(formDict()).find((w) => normEn(w.en) === normEn(en) && w.id !== form.id);
     if (dup && !window.confirm('Слово «' + dup.en + '» уже есть. Всё равно сохранить?')) return;
     const ex = form.ex.map((e) => ({ en: e.en.trim(), ru: e.ru.trim() })).filter((e) => e.en || e.ru);
 
@@ -309,7 +362,7 @@
     }
     const now = Date.now();
     const old = form.id ? getWord(form.id) : null;
-    const w = Object.assign({}, old || { id: core.uid(), c: now }, { en, ru, tr, ex, fl: form.keep.concat(newFiles.map((r) => r.id)) });
+    const w = Object.assign({}, old || { id: core.uid(), c: now }, { en, ru, tr, ex, dict: formDict(), fl: form.keep.concat(newFiles.map((r) => r.id)) });
     // убранные вложения помечаем удалёнными (с driveId, чтобы стереть их на Drive)
     for (const fid of form.orig) {
       if (!form.keep.includes(fid)) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
@@ -371,23 +424,31 @@
     openModal(
       '<h2>Импорт слов из CSV</h2>' +
       '<p class="muted small">Колонки: <b>en, ru, transcription, example_en, example_ru</b>. Первая строка — заголовок (необязательно). Подходят разделители «;», «,» и табуляция, кодировка UTF-8 или Windows-1251. Несколько примеров в одной ячейке разделяйте « | ».</p>' +
+      '<label>В какой словарь<select id="imp-dict">' + dictOptions(curId() === 'all' ? core.dictId({}) : curId()) + '<option value="__new">＋ Новый словарь…</option></select></label>' +
+      '<label id="imp-newwrap" hidden>Название нового словаря<input type="text" id="imp-newname" maxlength="40" autocomplete="off"></label>' +
       '<div class="row wrap" style="margin-bottom:12px"><button class="btn primary" data-act="imp-pick">Выбрать файл</button><button class="btn" data-act="tpl">Скачать образец</button></div>' +
       '<input type="file" id="imp-file" accept=".csv,.txt,text/csv,text/plain" hidden>' +
       '<div class="sect"><div class="sect-h">Или вставьте текст</div><textarea id="imp-text" placeholder="apple;яблоко;ˈæp.əl;I eat an apple.;Я ем яблоко."></textarea><div style="margin-top:8px"><button class="btn" data-act="imp-parse">Проверить</button></div></div>' +
       '<div id="imp-prev"></div><div class="actions"><button class="btn" data-act="modal-close">Закрыть</button></div>', 'wide'
     );
   }
+  const impDict = () => { const e = $('#imp-dict'); return e ? e.value : ''; };
   function parseImport(text) {
-    const p = csv.parse(text);
-    imp.parsed = p;
-    const map = new Map(liveWords().map((w) => [normEn(w.en), w]));
+    imp.parsed = csv.parse(text);
+    previewImport();
+  }
+  function previewImport() {
+    const p = imp && imp.parsed;
+    if (!p) return;
+    const tgt = impDict();
+    const map = new Map(tgt === '__new' ? [] : wordsOfDict(tgt).map((w) => [normEn(w.en), w]));
     const dups = p.rows.filter((r) => map.has(normEn(r.en))).length;
     imp.dups = dups;
     let h = '';
     if (!p.rows.length) {
       h = '<div class="note err">Не нашёл ни одной строки со словом и переводом.' + (p.errors.length ? ' Например: ' + esc(p.errors[0].msg) : '') + '</div>';
     } else {
-      h += '<div class="note info">Найдено слов: <b>' + p.rows.length + '</b> (новых: ' + (p.rows.length - dups) + ', уже есть: ' + dups + ')' + (p.errors.length ? ', пропущено строк с ошибками: ' + p.errors.length : '') +
+      h += '<div class="note info">Найдено слов: <b>' + p.rows.length + '</b> (новых: ' + (p.rows.length - dups) + ', уже есть' + (liveDicts().length > 1 && tgt !== '__new' ? ' в словаре «' + esc(dictName(tgt)) + '»' : '') + ': ' + dups + ')' + (p.errors.length ? ', пропущено строк с ошибками: ' + p.errors.length : '') +
         (p.swappedRows ? '. В строках, где русский и английский были наоборот, поменял их местами: ' + p.swappedRows : '') + '.</div>';
       h += '<table class="prev"><tr><th>Английский</th><th>Транскрипция</th><th>Русский</th></tr>' +
         p.rows.slice(0, 6).map((r) => '<tr><td>' + esc(r.en) + '</td><td>' + esc(r.tr) + '</td><td>' + esc(r.ru) + '</td></tr>').join('') + '</table>';
@@ -402,13 +463,20 @@
     if (!imp || !imp.parsed) return;
     const modeEl = $('#imp-mode');
     const mode = modeEl ? modeEl.value : 'skip';
-    const map = new Map(liveWords().map((w) => [normEn(w.en), w]));
     const now = Date.now();
+    let tgt = impDict();
+    if (tgt === '__new') {
+      const name = $('#imp-newname').value.trim();
+      const err = dictNameError(name);
+      if (err) { toast(err); $('#imp-newname').focus(); return; }
+      tgt = core.upsert('dicts', { id: core.uid(), name, c: now }).id;
+    }
+    const map = new Map(wordsOfDict(tgt).map((w) => [normEn(w.en), w]));
     let added = 0, updated = 0, skipped = 0;
     imp.parsed.rows.forEach((r, i) => {
       const ex = map.get(normEn(r.en));
       if (!ex) {
-        const w = { id: core.uid(), en: r.en, ru: r.ru, tr: r.tr, ex: r.ex, fl: [], c: now + i / 1000, u: now };
+        const w = { id: core.uid(), en: r.en, ru: r.ru, tr: r.tr, ex: r.ex, fl: [], dict: tgt, c: now + i / 1000, u: now };
         core.S.words.push(w);
         map.set(normEn(r.en), w);
         added++;
@@ -420,6 +488,7 @@
         updated++;
       } else skipped++;
     });
+    if (tgt !== curId() && curId() !== 'all') setCur(tgt);
     core.commit();
     closeModal();
     toast('Добавлено: ' + added + (updated ? ', обновлено: ' + updated : '') + (skipped ? ', пропущено: ' + skipped : ''));
@@ -427,13 +496,13 @@
 
   /* ---------- занятие ---------- */
   function startStudy() {
-    study = { done: 0, correct: 0, cur: null, revealed: false, last: null };
+    study = { done: 0, correct: 0, cur: null, revealed: false, last: null, dict: curId() };
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.body.classList.add('noscroll');
     nextCard();
   }
   function nextCard() {
-    const r = srs.pickNext(core.S.words, opts());
+    const r = srs.pickNext(inScope(study.dict), opts());
     if (!r.pick) study.cur = null;
     else study.cur = { id: r.pick.w.id, k: r.pick.k, kind: r.kind, stats: r.stats };
     study.revealed = false;
@@ -477,7 +546,7 @@
     if (l.good) study.correct = Math.max(0, study.correct - 1);
     study.last = null;
     core.commit();
-    const r = srs.pickNext(core.S.words, opts());
+    const r = srs.pickNext(inScope(study.dict), opts());
     study.cur = Object.assign({}, l.cur, { stats: r.stats });
     study.revealed = false;
     renderStudy();
@@ -523,7 +592,7 @@
       }
     }
     root.innerHTML = '<div class="study" role="dialog" aria-label="Занятие"><div class="st-top"><button class="icon-btn plain" data-act="study-close" aria-label="Закрыть">' + I.close + '</button>' +
-      '<div class="st-prog">' + (cur ? 'Осталось: <b>' + left + '</b>' : '') + '</div><button class="icon-btn plain" data-act="undo" aria-label="Отменить последний ответ"' + (study.last ? '' : ' disabled style="opacity:.35"') + '>' + I.undo + '</button></div>' +
+      '<div class="st-prog">' + (liveDicts().length > 1 ? '<span class="muted">' + esc(scopeLabel(study.dict)) + '</span> · ' : '') + (cur ? 'Осталось: <b>' + left + '</b>' : '') + '</div><button class="icon-btn plain" data-act="undo" aria-label="Отменить последний ответ"' + (study.last ? '' : ' disabled style="opacity:.35"') + '>' + I.undo + '</button></div>' +
       '<div class="st-body">' + body + '</div>' + (actions ? '<div class="st-actions">' + actions + '</div>' : '') + '</div>';
   }
 
@@ -561,7 +630,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (M.autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">Eng word · версия 1.0 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">Eng word · версия 1.1 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = M.accent;
     fillVoices();
     refreshData();
@@ -588,13 +657,14 @@
       }
     } catch (e) { /* ignore */ }
     if ($('#dataCard') !== el) return;
-    el.innerHTML = '<h3>Данные</h3><div class="muted small" style="margin-bottom:8px">Слов: ' + words + ' · вложений: ' + files + '</div>' + extra +
+    el.innerHTML = '<h3>Данные</h3><div class="muted small" style="margin-bottom:8px">Слов: ' + words + ' · словарей: ' + core.live('dicts').length + ' · вложений: ' + files + '</div>' + extra +
       '<div class="row wrap" style="margin-top:12px"><button class="btn" data-act="export">Экспорт CSV</button><button class="btn" data-act="tpl">Образец CSV</button><button class="btn" data-act="clear-files">Очистить файлы на устройстве</button></div>' +
       '<div style="margin-top:12px"><button class="btn danger" data-act="wipe">Стереть данные на этом устройстве</button></div>';
   }
   async function wipeLocal() {
     if (!window.confirm('Стереть все слова, прогресс и файлы на этом устройстве?' + (M.signedIn ? ' Копия на Google Drive останется и вернётся при следующей синхронизации.' : ' Без входа в Google их нельзя будет вернуть.'))) return;
-    core.S = core.defaults();
+    core.S = core.normalize(core.defaults());
+    M.cur = '';
     M.dirty = false; M.rv = ''; M.lastSync = 0;
     core.saveMeta();
     await core.persist(true);
@@ -603,10 +673,194 @@
     show('study');
   }
 
+  /* ---------- словари: управление, слияние, проверка повторов ---------- */
+  function openDicts() {
+    dm = { v: 'list', edit: '', src: '', dst: '', pol: 'target' };
+    openModal('', 'wide');
+    renderDm();
+  }
+  function renderDm() {
+    const sh = $('#modal-root .sheet');
+    if (!sh || !dm) return;
+    sh.innerHTML = dm.v === 'merge' ? mergeHTML() : dm.v === 'check' ? checkHTML() : dictsListHTML();
+  }
+  const wordsWord = (n) => { const a = n % 100, b = n % 10; return n + ' ' + (a > 10 && a < 15 ? 'слов' : b === 1 ? 'слово' : b > 1 && b < 5 ? 'слова' : 'слов'); };
+  function dictsListHTML() {
+    const ds = liveDicts(), n = dictCounts(), cur = curId();
+    const rows = ds.map((d) => {
+      if (dm.edit === d.id) {
+        return '<form class="di" id="dm-renf" data-id="' + esc(d.id) + '" autocomplete="off"><input type="text" id="dm-ren" class="grow" maxlength="40" value="' + esc(d.name) + '"><button class="btn primary" type="submit">Сохранить</button><button type="button" class="btn" data-act="dm-ren-cancel">Отмена</button></form>';
+      }
+      return '<div class="di"><div class="di-main"><div class="di-name">' + esc(d.name) + (d.id === cur ? '<span class="badge new">выбран</span>' : '') + '</div><div class="muted small">' + wordsWord(n[d.id] || 0) + '</div></div>' +
+        '<div class="di-btns">' + (d.id === cur ? '' : '<button type="button" class="btn" data-act="dm-pick" data-id="' + esc(d.id) + '">Открыть</button>') +
+        '<button type="button" class="btn" data-act="dm-ren" data-id="' + esc(d.id) + '">Переименовать</button>' +
+        (ds.length > 1 ? '<button type="button" class="btn" data-act="dm-mergefrom" data-id="' + esc(d.id) + '">Слить в…</button>' : '') +
+        '<button type="button" class="btn danger" data-act="dm-del" data-id="' + esc(d.id) + '"' + (ds.length > 1 ? '' : ' disabled') + '>' + I.trash + 'Удалить</button></div></div>';
+    }).join('');
+    return '<h2>Словари</h2><p class="muted small" style="margin-top:0">Занятия, повторения и список слов показывают только выбранный словарь. Одно и то же слово может быть в разных словарях.</p>' +
+      '<form class="row" id="dmf" autocomplete="off" style="margin-bottom:12px"><input type="text" id="dm-new" class="grow" maxlength="40" placeholder="Название нового словаря"><button class="btn primary" type="submit">Создать</button></form>' +
+      '<div class="note err" id="dm-err" hidden></div><div class="dlist">' + rows + '</div>' +
+      '<div class="row wrap" style="margin-top:12px"><button type="button" class="btn" data-act="dm-merge"' + (ds.length > 1 ? '' : ' disabled') + '>Слить словари…</button><button type="button" class="btn" data-act="dm-check">Проверить повторы</button></div>' +
+      '<div class="actions"><button type="button" class="btn" data-act="modal-close">Закрыть</button></div>';
+  }
+  function dmErr(msg) { const e = $('#dm-err'); if (e) { e.hidden = !msg; e.textContent = msg || ''; } }
+
+  function createDict(name) {
+    name = name.trim();
+    const err = dictNameError(name);
+    if (err) { dmErr(err); return; }
+    const d = core.upsert('dicts', { id: core.uid(), name, c: Date.now() });
+    setCur(d.id);
+    core.commit();
+    dm.edit = '';
+    renderDm();
+    toast('Словарь «' + name + '» создан и выбран');
+  }
+  function renameDict(id, name) {
+    name = name.trim();
+    const err = dictNameError(name, id);
+    if (err) { dmErr(err); return; }
+    const d = core.get('dicts', id);
+    if (!d || d.d) return;
+    core.upsert('dicts', Object.assign({}, d, { name }));
+    core.commit();
+    dm.edit = '';
+    renderDm();
+  }
+  function deleteDict(id) {
+    const ds = liveDicts();
+    const d = core.get('dicts', id);
+    if (!d || d.d || ds.length < 2) return;
+    const ws = wordsOfDict(id);
+    if (!window.confirm('Удалить словарь «' + d.name + '»' + (ws.length ? ' вместе с его словами (' + ws.length + ')' : '') + '? Слова можно сначала перенести в другой словарь через «Слить в…».')) return;
+    for (const w of ws) {
+      for (const fid of w.fl || []) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
+      core.tomb('words', w.id);
+    }
+    core.tomb('dicts', id);
+    if (M.cur === id) setCur('');
+    core.commit();
+    renderDm();
+    toast('Словарь удалён');
+  }
+
+  const unionIds = (a, b) => Array.from(new Set((a || []).concat(b || [])));
+  function unionEx(a, b) {
+    const out = (a || []).slice();
+    const key = (e) => normEn(e.en) + '|' + normEn(e.ru);
+    const seen = new Set(out.map(key));
+    for (const e of b || []) if (!seen.has(key(e))) { seen.add(key(e)); out.push(e); }
+    return out;
+  }
+  /*
+   * Слияние: слова из src переносятся в dst. Повторы ищутся по английскому слову (без учёта регистра).
+   * pol: 'target' — остаётся слово из dst (к нему добавляются примеры и файлы, сохраняется лучший прогресс),
+   *      'source' — слово из dst заменяется словом из src, 'both' — повторы не объединяются.
+   * dry = true — только подсчёт, данные не меняются.
+   */
+  function runMerge(src, dst, pol, dry) {
+    const now = Date.now();
+    const r = core.dictResolver();
+    const all = liveWords();
+    const rep = new Map();
+    for (const w of all) if (r(w) === dst) { const k = normEn(w.en); if (!rep.has(k)) rep.set(k, w); }
+    const res = { src: 0, moved: 0, merged: 0, replaced: 0, dups: [] };
+    for (const s of all.filter((w) => r(w) === src)) {
+      res.src++;
+      const k = normEn(s.en);
+      const t = pol === 'both' ? null : rep.get(k);
+      if (!t) {
+        if (!dry) { s.dict = dst; s.u = now; }
+        if (pol !== 'both') rep.set(k, s);
+        res.moved++;
+        continue;
+      }
+      if (res.dups.length < 200) res.dups.push({ en: s.en, s: s.ru, t: t.ru, same: normEn(s.ru) === normEn(t.ru) });
+      if (pol === 'source') {
+        if (!dry) { s.dict = dst; s.fl = unionIds(s.fl, t.fl); s.u = now; core.tomb('words', t.id); }
+        rep.set(k, s);
+        res.replaced++;
+      } else {
+        if (!dry) {
+          t.ex = unionEx(t.ex, s.ex);
+          t.fl = unionIds(t.fl, s.fl);
+          if (!t.tr && s.tr) t.tr = s.tr;
+          for (const c of ['f', 'b']) if (s[c] && (!t[c] || (s[c].reps || 0) > (t[c].reps || 0))) t[c] = s[c];
+          t.u = now;
+          core.tomb('words', s.id);
+        }
+        res.merged++;
+      }
+    }
+    return res;
+  }
+  function mergeHTML() {
+    const ds = liveDicts();
+    if (!dm.src || !ds.some((d) => d.id === dm.src)) dm.src = curId() === 'all' ? ds[0].id : curId();
+    if (!dm.dst || dm.dst === dm.src || !ds.some((d) => d.id === dm.dst)) dm.dst = (ds.find((d) => d.id !== dm.src) || ds[0]).id;
+    const pv = runMerge(dm.src, dm.dst, dm.pol, true);
+    const sel = (id, cur, skip) => ds.filter((d) => d.id !== skip).map((d) => '<option value="' + esc(d.id) + '"' + (d.id === cur ? ' selected' : '') + '>' + esc(d.name) + '</option>').join('');
+    let prev = '<div class="note info">В «' + esc(dictName(dm.src)) + '»: ' + wordsWord(pv.src) + '. Перенесётся новых: <b>' + pv.moved + '</b>. Повторов с «' + esc(dictName(dm.dst)) + '»: <b>' + (dm.pol === 'both' ? 0 : pv.merged + pv.replaced) + '</b>' +
+      (dm.pol === 'both' ? ' (повторы не проверяются)' : '') + '.</div>';
+    if (pv.dups.length && dm.pol !== 'both') {
+      prev += '<details open class="dups"><summary class="muted small">Повторы (' + pv.dups.length + ')</summary><div class="small">' +
+        pv.dups.slice(0, 12).map((d) => '<div class="dg"><b>' + esc(d.en) + '</b> — ' + (d.same ? esc(d.s) : esc(d.s) + ' <span class="muted">/ в «' + esc(dictName(dm.dst)) + '»: ' + esc(d.t) + '</span>') + '</div>').join('') +
+        (pv.dups.length > 12 ? '<div class="muted">…и ещё ' + (pv.dups.length - 12) + '</div>' : '') + '</div></details>';
+    }
+    return '<h2>Слить словари</h2><p class="muted small" style="margin-top:0">Слова из первого словаря переносятся во второй, повторы (по английскому слову) проверяются. Первый словарь после этого удаляется.</p>' +
+      '<label>Из словаря<select id="mg-src">' + sel('', dm.src, '') + '</select></label>' +
+      '<label>В словарь<select id="mg-dst">' + sel('', dm.dst, dm.src) + '</select></label>' +
+      '<label>Если слово есть в обоих словарях<select id="mg-pol">' +
+      '<option value="target"' + (dm.pol === 'target' ? ' selected' : '') + '>Оставить слово из второго словаря</option>' +
+      '<option value="source"' + (dm.pol === 'source' ? ' selected' : '') + '>Заменить словом из первого словаря</option>' +
+      '<option value="both"' + (dm.pol === 'both' ? ' selected' : '') + '>Не объединять — перенести всё</option></select></label>' +
+      (dm.pol === 'target' ? '<p class="muted small" style="margin-top:-4px">К оставленному слову добавятся недостающие примеры и файлы, а из прогресса сохранится лучший.</p>' : '') +
+      '<div id="mg-prev">' + prev + '</div>' +
+      '<div class="actions"><button type="button" class="btn" data-act="dm-back">Назад</button><button type="button" class="btn primary" data-act="mg-go">Слить</button></div>';
+  }
+  function doMerge() {
+    if (!dm || dm.src === dm.dst) return;
+    const from = dictName(dm.src), to = dictName(dm.dst);
+    const pv = runMerge(dm.src, dm.dst, dm.pol, true);
+    if (!window.confirm('Слить «' + from + '» в «' + to + '»? Перенесётся слов: ' + pv.moved + (pv.merged + pv.replaced ? ', повторов объединится: ' + (pv.merged + pv.replaced) : '') + '. Словарь «' + from + '» будет удалён.')) return;
+    const r = runMerge(dm.src, dm.dst, dm.pol, false);
+    core.tomb('dicts', dm.src);
+    if (M.cur === dm.src || M.cur === 'all') setCur(dm.dst);
+    core.commit();
+    dm.v = 'list'; dm.src = ''; dm.dst = '';
+    renderDm();
+    toast('Готово. Перенесено: ' + r.moved + (r.merged + r.replaced ? ', повторов объединено: ' + (r.merged + r.replaced) : ''));
+  }
+  function checkHTML() {
+    const rs = core.dictResolver();
+    const g = new Map();
+    for (const w of liveWords()) { const k = normEn(w.en); if (!g.has(k)) g.set(k, []); g.get(k).push(w); }
+    const groups = Array.from(g.values()).filter((a) => a.length > 1).sort((a, b) => a[0].en.localeCompare(b[0].en));
+    const inOne = groups.filter((a) => new Set(a.map(rs)).size < a.length).length;
+    let h = '<h2>Проверка повторов</h2>';
+    if (!groups.length) h += '<div class="note info">Повторов нет: каждое английское слово встречается только один раз.</div>';
+    else {
+      h += '<div class="note info">Слов, которые встречаются больше одного раза: <b>' + groups.length + '</b>' + (inOne ? ', из них внутри одного словаря: ' + inOne : '') + '. Слово в разных словарях — это нормально; объединить словари можно кнопкой «Слить словари…».</div>' +
+        '<div class="dlist">' + groups.slice(0, 40).map((a) => '<div class="dg"><b>' + esc(a[0].en) + '</b>' + a.map((w) => '<div class="small"><span class="muted">' + esc(dictName(rs(w))) + ':</span> ' + esc(w.ru) + '</div>').join('') + '</div>').join('') +
+        (groups.length > 40 ? '<div class="muted small">…и ещё ' + (groups.length - 40) + '</div>' : '') + '</div>';
+    }
+    return h + '<div class="actions"><button type="button" class="btn" data-act="dm-back">Назад</button>' + (liveDicts().length > 1 ? '<button type="button" class="btn primary" data-act="dm-merge">Слить словари…</button>' : '') + '</div>';
+  }
+
   /* ---------- события ---------- */
   const actions = {
     tab: (el) => show(el.dataset.tab),
     chip: () => { if (!M.signedIn) show('settings'); else D.syncNow({ interactive: true }); },
+    dicts: () => openDicts(),
+    'dm-back': () => { dm.v = 'list'; renderDm(); },
+    'dm-pick': (el) => { setCur(el.dataset.id); closeModal(); view.dataset.tab = ''; render(); },
+    'dm-ren': (el) => { dm.edit = el.dataset.id; renderDm(); const i = $('#dm-ren'); if (i) { i.focus(); i.select(); } },
+    'dm-ren-cancel': () => { dm.edit = ''; renderDm(); },
+    'dm-del': (el) => deleteDict(el.dataset.id),
+    'dm-merge': () => { dm.v = 'merge'; renderDm(); },
+    'dm-mergefrom': (el) => { dm.v = 'merge'; dm.src = el.dataset.id; dm.dst = ''; renderDm(); },
+    'dm-check': () => { dm.v = 'check'; renderDm(); },
+    'mg-go': () => doMerge(),
     add: () => openWordForm(),
     edit: (el) => openWordForm(el.dataset.id),
     speak: (el) => speakText(el.dataset.text),
@@ -632,9 +886,11 @@
     'imp-do': () => doImport(),
     tpl: () => download('eng-word-template.csv', csv.TEMPLATE),
     export: () => {
-      const ws = liveWords().sort((a, b) => (a.c || 0) - (b.c || 0));
+      const sc = curId();
+      const ws = scopeWords().sort((a, b) => (a.c || 0) - (b.c || 0));
       if (!ws.length) { toast('Нет слов для экспорта'); return; }
-      download('eng-word-' + dateStr() + '.csv', csv.stringify(ws));
+      const nm = liveDicts().length > 1 ? '-' + scopeLabel(sc).replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '') : '';
+      download('eng-word' + nm + '-' + dateStr() + '.csv', csv.stringify(ws));
     },
     'study-start': () => startStudy(),
     'study-close': () => closeStudy(),
@@ -655,7 +911,12 @@
     if (fn) fn(el, e);
   });
   document.addEventListener('pointerdown', (e) => { if (e.target.closest && e.target.closest('[data-act="signin"]')) D.preload(); });
-  document.addEventListener('submit', (e) => { if (e.target.id === 'wf') { e.preventDefault(); saveWord(false); } });
+  document.addEventListener('submit', (e) => {
+    const id = e.target.id;
+    if (id === 'wf') { e.preventDefault(); saveWord(false); }
+    else if (id === 'dmf') { e.preventDefault(); createDict($('#dm-new').value); }
+    else if (id === 'dm-renf') { e.preventDefault(); renameDict(e.target.dataset.id, $('#dm-ren').value); }
+  });
   document.addEventListener('input', (e) => {
     const id = e.target.id;
     if (id === 'w-q') { wordsUI.q = e.target.value; wordsUI.limit = 80; renderWordList(); }
@@ -665,6 +926,12 @@
   document.addEventListener('change', (e) => {
     const t = e.target, id = t.id;
     if (id === 'w-f') { wordsUI.filter = t.value; wordsUI.limit = 80; renderWordList(); }
+    else if (id === 'd-sel') { setCur(t.value); wordsUI.limit = 80; view.dataset.tab = ''; render(); }
+    else if (id === 'f-dict') { form.dict = t.value; checkDup(); }
+    else if (id === 'imp-dict') { $('#imp-newwrap').hidden = t.value !== '__new'; if (t.value === '__new') $('#imp-newname').focus(); previewImport(); }
+    else if (id === 'mg-src') { dm.src = t.value; renderDm(); }
+    else if (id === 'mg-dst') { dm.dst = t.value; renderDm(); }
+    else if (id === 'mg-pol') { dm.pol = t.value; renderDm(); }
     else if (id === 's-new') { const n = Math.max(0, Math.min(500, parseInt(t.value, 10) || 0)); t.value = n; core.setSettings({ newPerDay: n }); core.commit(); }
     else if (id === 's-df' || id === 's-db') {
       const f = $('#s-df').checked, b = $('#s-db').checked;

@@ -200,3 +200,17 @@ table.prev th { color: var(--muted); font-weight: 600; }
 #toast.show { opacity: 1; transform: translateX(-50%); }
 @media (min-width: 820px) { #toast { bottom: 24px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- словари ---------- */
+.dictbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.dictbar select { flex: 1; min-width: 0; font-weight: 600; }
+.wi-dict { color: var(--muted); font-size: .8125rem; }
+.dlist { display: flex; flex-direction: column; gap: 8px; }
+.di { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+.di-main { flex: 1; min-width: 140px; }
+.di-name { font-weight: 700; overflow-wrap: anywhere; }
+.di-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.di-btns .btn { padding: 6px 10px; min-height: 36px; font-size: .875rem; }
+.di form, form.di { }
+.dg { background: var(--bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
+details.dups { margin-bottom: 12px; }

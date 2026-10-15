@@ -1,4 +1,4 @@
-/* Eng word — ядро: состояние, хранение, слияние по записям. */
+/* English Words — ядро: состояние, хранение, слияние по записям. */
 (function () {
   'use strict';
   const EW = (window.EW = window.EW || {});
@@ -9,7 +9,7 @@
   const TOMB_TTL = 90 * 864e5;
 
   function defaults() {
-    return { v: 1, settings: { u: 0, newPerDay: 10, dirs: { f: true, b: true } }, words: [], files: [], days: [], dicts: [] };
+    return { v: 1, settings: { u: 0, ts: {}, newPerDay: 10, dirs: { f: true, b: true }, accent: 'en-US', voice: '', rate: 0.9, autoSpeak: true, cur: '' }, words: [], files: [], days: [], dicts: [] };
   }
   function normalize(s) {
     const d = defaults();
@@ -17,6 +17,7 @@
     s.v = 1;
     s.settings = Object.assign({}, d.settings, s.settings || {});
     s.settings.dirs = Object.assign({}, d.settings.dirs, s.settings.dirs || {});
+    if (!s.settings.ts || typeof s.settings.ts !== 'object') s.settings.ts = {};
     for (const c of COLLS) if (!Array.isArray(s[c])) s[c] = [];
     ensureDicts(s);
     return s;
@@ -30,7 +31,8 @@
     return true;
   }
 
-  const metaDefaults = { signedIn: false, dirty: false, lastSync: 0, rv: '', voice: '', cur: '', accent: 'en-US', rate: 0.9, autoSpeak: true };
+  // Только то, что относится к самому устройству. Все настройки (занятия, голос, выбранный словарь) лежат в S.settings и синхронизируются.
+  const metaDefaults = { signedIn: false, dirty: false, lastSync: 0, rv: '' };
   function loadMeta() {
     try { return Object.assign({}, metaDefaults, JSON.parse(localStorage.getItem(LS_META) || '{}')); } catch (e) { return Object.assign({}, metaDefaults); }
   }
@@ -166,9 +168,14 @@
     const i = core.S[c].findIndex((x) => x.id === id);
     if (i >= 0) core.S[c][i] = Object.assign({ id, d: true, u: Date.now() }, extra || {});
   };
+  // Каждая настройка помнит своё время изменения (ts), поэтому правки разных настроек на разных устройствах не затирают друг друга.
   core.setSettings = function (patch) {
-    core.S.settings = Object.assign({}, core.S.settings, patch);
-    core.S.settings.u = Date.now();
+    const now = Date.now();
+    const s = Object.assign({}, core.S.settings, patch);
+    s.ts = Object.assign({}, core.S.settings.ts || {});
+    for (const k of Object.keys(patch)) s.ts[k] = now;
+    s.u = now;
+    core.S.settings = s;
   };
   // Любое изменение данных проходит через commit()
   core.commit = function () {
@@ -199,10 +206,18 @@
       L[c] = [...lm.values()].filter((x) => !(x.d && !x.driveId && now - (x.u || 0) > TOMB_TTL));
     }
     if (ensureDicts(L)) pushNeeded = true;
-    const ru = (R.settings && R.settings.u) || 0;
-    const lu = L.settings.u || 0;
-    if (ru > lu) { L.settings = Object.assign({}, defaults().settings, R.settings); pullChanged = true; }
-    else if (lu > ru) pushNeeded = true;
+    const rs = R.settings || {}, ls = L.settings;
+    const lts = Object.assign({}, ls.ts || {});
+    const rts = rs.ts || {};
+    for (const k of Object.keys(Object.assign({}, ls, rs))) {
+      if (k === 'u' || k === 'ts') continue;
+      const lt = lts[k] != null ? lts[k] : ls.u || 0;
+      const rt = rts[k] != null ? rts[k] : rs.u || 0;
+      if (k in rs && rt > lt) { ls[k] = rs[k]; lts[k] = rt; pullChanged = true; }
+      else if (lt > rt || !(k in rs)) { if (lt > rt || (k in ls && !(k in rs))) pushNeeded = true; }
+    }
+    ls.ts = lts;
+    ls.u = Math.max(ls.u || 0, rs.u || 0);
     return { pushNeeded, pullChanged };
   };
 

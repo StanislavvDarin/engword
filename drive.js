@@ -1,4 +1,4 @@
-/* Eng word — вход через Google (GIS, token flow) и синхронизация с appDataFolder на Google Drive. Бэкенда нет. */
+/* English Words — вход через Google (GIS, token flow) и синхронизация с appDataFolder на Google Drive. Бэкенда нет. */
 (function () {
   'use strict';
   const EW = (window.EW = window.EW || {});

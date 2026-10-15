@@ -35,7 +35,7 @@ h2 { font-size: 1.25rem; }
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; min-width: 0; }
-.logo { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--acc); color: #fff; font-size: .9rem; font-weight: 800; letter-spacing: -.5px; flex: none; }
+.logo { width: 32px; height: 32px; border-radius: 9px; flex: none; display: block; }
 .chip {
   border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; font-size: .8125rem; color: var(--muted);
   cursor: pointer; max-width: 55vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -214,3 +214,8 @@ table.prev th { color: var(--muted); font-weight: 600; }
 .di form, form.di { }
 .dg { background: var(--bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
 details.dups { margin-bottom: 12px; }
+
+@media (max-width: 440px) {
+  .brand-name { white-space: nowrap; font-size: .95rem; }
+  .chip { font-size: .75rem; padding: 6px 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

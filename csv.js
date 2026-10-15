@@ -1,4 +1,4 @@
-/* Eng word — импорт и экспорт CSV. Понимает запятую, точку с запятой и табуляцию, кавычки, BOM, UTF-8 и Windows-1251. */
+/* English Words — импорт и экспорт CSV. Понимает запятую, точку с запятой и табуляцию, кавычки, BOM, UTF-8 и Windows-1251. */
 (function () {
   'use strict';
   const EW = (window.EW = window.EW || {});

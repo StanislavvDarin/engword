@@ -1,4 +1,4 @@
-/* Eng word — синтезатор речи (Web Speech API). Голоса берутся из самого устройства. */
+/* English Words — синтезатор речи (Web Speech API). Голоса берутся из самого устройства. */
 (function () {
   'use strict';
   const EW = (window.EW = window.EW || {});

@@ -1,4 +1,4 @@
-/* Eng word — интерфейс */
+/* English Words — интерфейс */
 (function () {
   'use strict';
   const EW = window.EW;
@@ -28,6 +28,7 @@
 
   /* ---------- общее ---------- */
   const S = () => core.S;
+  const PR = () => core.S.settings; // настройки: они синхронизируются между устройствами
   const getWord = (id) => { const w = core.get('words', id); return w && !w.d ? w : null; };
   const liveWords = () => core.live('words');
   /* ---------- словари ---------- */
@@ -35,11 +36,13 @@
   const dictName = (id) => { const d = core.get('dicts', id); return d && !d.d ? d.name : '—'; };
   function curId() {
     const ds = core.live('dicts');
-    if (M.cur === 'all' && ds.length > 1) return 'all';
-    if (ds.some((d) => d.id === M.cur)) return M.cur;
+    const c = PR().cur;
+    if (c === 'all' && ds.length > 1) return 'all';
+    if (ds.some((d) => d.id === c)) return c;
     return (ds.find((d) => d.id === 'main') || ds[0] || { id: 'main' }).id;
   }
-  function setCur(id) { M.cur = id; core.saveMeta(); }
+  // Выбранный словарь синхронизируется вместе с остальными настройками; сам commit делает вызывающий код
+  function setCur(id) { if (PR().cur !== id) core.setSettings({ cur: id }); }
   function inScope(sc) {
     const all = liveWords();
     if (sc === 'all') return all;
@@ -88,7 +91,7 @@
   function speakText(text) {
     if (!tts.supported) { toast('Этот браузер не умеет озвучивать текст'); return; }
     if (!text) return;
-    tts.speak(text, { accent: M.accent, voice: M.voice, rate: M.rate }).then((ok) => {
+    tts.speak(text, { accent: PR().accent, voice: PR().voice, rate: PR().rate }).then((ok) => {
       if (!ok && !tts.list().length) toast('На устройстве нет английского голоса. Установите его в настройках синтеза речи');
     });
   }
@@ -507,14 +510,14 @@
     else study.cur = { id: r.pick.w.id, k: r.pick.k, kind: r.kind, stats: r.stats };
     study.revealed = false;
     renderStudy();
-    if (study.cur && study.cur.k === 'f' && M.autoSpeak) speakText(r.pick.w.en);
+    if (study.cur && study.cur.k === 'f' && PR().autoSpeak) speakText(r.pick.w.en);
   }
   function reveal() {
     if (!study || !study.cur || study.revealed) return;
     study.revealed = true;
     renderStudy();
     const w = getWord(study.cur.id);
-    if (w && study.cur.k === 'b' && M.autoSpeak) speakText(w.en);
+    if (w && study.cur.k === 'b' && PR().autoSpeak) speakText(w.en);
   }
   function grade(g) {
     if (!study || !study.cur || !study.revealed) return;
@@ -616,22 +619,22 @@
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
     view.innerHTML =
       '<div class="card" id="syncCard">' + syncCardHTML() + '</div>' +
-      (installEvt ? '<div class="card"><h3>Приложение</h3><p class="muted small" style="margin-top:0">Установите Eng word на устройство: откроется как обычное приложение и будет работать без интернета.</p><button class="btn primary" data-act="install">Установить</button></div>' : '') +
+      (installEvt ? '<div class="card"><h3>Приложение</h3><p class="muted small" style="margin-top:0">Установите English Words на устройство: откроется как обычное приложение и будет работать без интернета.</p><button class="btn primary" data-act="install">Установить</button></div>' : '') +
       (ios ? '<div class="card"><h3>Установка на iPhone</h3><p class="muted small" style="margin:0">В Safari нажмите «Поделиться» и выберите «На экран Домой». Так приложение откроется отдельно и данные надёжнее сохранятся.</p></div>' : '') +
-      '<div class="card"><h3>Занятия</h3><p class="muted small" style="margin-top:0">Эти настройки одинаковы на всех ваших устройствах.</p>' +
+      '<div class="card"><h3>Занятия</h3><p class="muted small" style="margin-top:0">Все настройки приложения переносятся на другие ваши устройства, если вы вошли в Google.</p>' +
       '<label>Новых слов в день<input type="number" id="s-new" min="0" max="500" value="' + s.newPerDay + '"></label>' +
       '<label class="check"><input type="checkbox" id="s-df"' + (s.dirs.f ? ' checked' : '') + '>Английский → русский</label>' +
       '<label class="check"><input type="checkbox" id="s-db"' + (s.dirs.b ? ' checked' : '') + '>Русский → английский</label></div>' +
-      '<div class="card"><h3>Произношение</h3><p class="muted small" style="margin-top:0">Голоса берутся из вашего устройства, поэтому на телефоне и компьютере они могут отличаться.</p>' +
+      '<div class="card"><h3>Произношение</h3><p class="muted small" style="margin-top:0">Настройки переносятся между устройствами. Сами голоса берутся из устройства, поэтому на телефоне и компьютере они могут отличаться: если выбранного голоса нет, подберётся подходящий.</p>' +
       (tts.supported ? '' : '<div class="note err">Этот браузер не умеет озвучивать текст.</div>') +
       '<label>Акцент<select id="s-accent"><option value="en-US">Американский</option><option value="en-GB">Британский</option></select></label>' +
       '<label>Голос<select id="s-voice"></select></label>' +
-      '<label>Скорость: <span id="rate-v">' + M.rate.toFixed(2).replace('.', ',') + '</span><input type="range" id="s-rate" min="0.5" max="1.2" step="0.05" value="' + M.rate + '"></label>' +
-      '<label class="check"><input type="checkbox" id="s-auto"' + (M.autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
+      '<label>Скорость: <span id="rate-v">' + PR().rate.toFixed(2).replace('.', ',') + '</span><input type="range" id="s-rate" min="0.5" max="1.2" step="0.05" value="' + PR().rate + '"></label>' +
+      '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">Eng word · версия 1.1 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
-    $('#s-accent').value = M.accent;
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.2 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+    $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
   }
@@ -640,7 +643,7 @@
     if (!sel) return;
     const list = tts.list();
     sel.innerHTML = '<option value="">Подобрать автоматически</option>' + list.map((v) => '<option value="' + esc(v.voiceURI) + '">' + esc(v.name + ' (' + v.lang + ')') + '</option>').join('');
-    sel.value = M.voice && list.some((v) => v.voiceURI === M.voice) ? M.voice : '';
+    sel.value = PR().voice && list.some((v) => v.voiceURI === PR().voice) ? PR().voice : '';
   }
   async function refreshData() {
     const el = $('#dataCard');
@@ -664,7 +667,6 @@
   async function wipeLocal() {
     if (!window.confirm('Стереть все слова, прогресс и файлы на этом устройстве?' + (M.signedIn ? ' Копия на Google Drive останется и вернётся при следующей синхронизации.' : ' Без входа в Google их нельзя будет вернуть.'))) return;
     core.S = core.normalize(core.defaults());
-    M.cur = '';
     M.dirty = false; M.rv = ''; M.lastSync = 0;
     core.saveMeta();
     await core.persist(true);
@@ -738,7 +740,7 @@
       core.tomb('words', w.id);
     }
     core.tomb('dicts', id);
-    if (M.cur === id) setCur('');
+    if (PR().cur === id) setCur('');
     core.commit();
     renderDm();
     toast('Словарь удалён');
@@ -825,7 +827,7 @@
     if (!window.confirm('Слить «' + from + '» в «' + to + '»? Перенесётся слов: ' + pv.moved + (pv.merged + pv.replaced ? ', повторов объединится: ' + (pv.merged + pv.replaced) : '') + '. Словарь «' + from + '» будет удалён.')) return;
     const r = runMerge(dm.src, dm.dst, dm.pol, false);
     core.tomb('dicts', dm.src);
-    if (M.cur === dm.src || M.cur === 'all') setCur(dm.dst);
+    if (PR().cur === dm.src || PR().cur === 'all') setCur(dm.dst);
     core.commit();
     dm.v = 'list'; dm.src = ''; dm.dst = '';
     renderDm();
@@ -853,7 +855,7 @@
     chip: () => { if (!M.signedIn) show('settings'); else D.syncNow({ interactive: true }); },
     dicts: () => openDicts(),
     'dm-back': () => { dm.v = 'list'; renderDm(); },
-    'dm-pick': (el) => { setCur(el.dataset.id); closeModal(); view.dataset.tab = ''; render(); },
+    'dm-pick': (el) => { setCur(el.dataset.id); core.commit(); closeModal(); view.dataset.tab = ''; render(); },
     'dm-ren': (el) => { dm.edit = el.dataset.id; renderDm(); const i = $('#dm-ren'); if (i) { i.focus(); i.select(); } },
     'dm-ren-cancel': () => { dm.edit = ''; renderDm(); },
     'dm-del': (el) => deleteDict(el.dataset.id),
@@ -921,12 +923,12 @@
     const id = e.target.id;
     if (id === 'w-q') { wordsUI.q = e.target.value; wordsUI.limit = 80; renderWordList(); }
     else if (id === 'f-en') checkDup();
-    else if (id === 's-rate') { M.rate = +e.target.value; core.saveMeta(); $('#rate-v').textContent = M.rate.toFixed(2).replace('.', ','); }
+    else if (id === 's-rate') { $('#rate-v').textContent = (+e.target.value).toFixed(2).replace('.', ','); }
   });
   document.addEventListener('change', (e) => {
     const t = e.target, id = t.id;
     if (id === 'w-f') { wordsUI.filter = t.value; wordsUI.limit = 80; renderWordList(); }
-    else if (id === 'd-sel') { setCur(t.value); wordsUI.limit = 80; view.dataset.tab = ''; render(); }
+    else if (id === 'd-sel') { setCur(t.value); core.commit(); wordsUI.limit = 80; view.dataset.tab = ''; render(); }
     else if (id === 'f-dict') { form.dict = t.value; checkDup(); }
     else if (id === 'imp-dict') { $('#imp-newwrap').hidden = t.value !== '__new'; if (t.value === '__new') $('#imp-newname').focus(); previewImport(); }
     else if (id === 'mg-src') { dm.src = t.value; renderDm(); }
@@ -938,9 +940,10 @@
       if (!f && !b) { t.checked = true; toast('Нужно оставить хотя бы одно направление'); return; }
       core.setSettings({ dirs: { f, b } }); core.commit();
     }
-    else if (id === 's-accent') { M.accent = t.value; M.voice = ''; core.saveMeta(); fillVoices(); }
-    else if (id === 's-voice') { M.voice = t.value; core.saveMeta(); }
-    else if (id === 's-auto') { M.autoSpeak = t.checked; core.saveMeta(); }
+    else if (id === 's-rate') { core.setSettings({ rate: +t.value }); core.commit(); }
+    else if (id === 's-accent') { core.setSettings({ accent: t.value, voice: '' }); core.commit(); fillVoices(); }
+    else if (id === 's-voice') { core.setSettings({ voice: t.value }); core.commit(); }
+    else if (id === 's-auto') { core.setSettings({ autoSpeak: t.checked }); core.commit(); }
     else if (id === 'f-files') {
       for (const f of Array.from(t.files)) {
         if (f.size > D.MAX_FILE) { showFormErr('Файл «' + f.name + '» больше ' + Math.round(D.MAX_FILE / 1048576) + ' МБ'); continue; }
@@ -975,6 +978,15 @@
   /* ---------- запуск ---------- */
   async function boot() {
     await core.init();
+    // настройки, которые раньше хранились только на устройстве, переносим в синхронизируемые
+    let moved = false;
+    for (const k of ['accent', 'voice', 'rate', 'autoSpeak', 'cur']) {
+      if (M[k] !== undefined) {
+        if (!PR().ts[k] && M[k] !== core.defaults().settings[k]) { PR()[k] = M[k]; PR().ts[k] = 1; }
+        delete M[k]; moved = true;
+      }
+    }
+    if (moved) { core.saveMeta(); core.persist(); }
     core.hooks.changed = onChanged;
     core.hooks.error = toast;
     D.onstatus = () => { updateChip(); };

@@ -227,3 +227,9 @@ details.dups { margin-bottom: 12px; }
 .lv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .lv-in { display: flex; align-items: center; gap: 10px; }
 .lv-in input { width: 84px; }
+
+.prog { margin-top: 6px; }
+.pbar { position: relative; height: 8px; border-radius: 999px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line, #d5dbe7); overflow: hidden; margin-bottom: 4px; }
+.pbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
+.pbar .p1 { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.pbar .p2 { background: var(--ok); }

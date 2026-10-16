@@ -152,11 +152,19 @@
     return n;
   }
 
-  const byNew = (a, b) => (a.w.c || 0) - (b.w.c || 0) || (a.k === 'f' ? -1 : 1) - (b.k === 'f' ? -1 : 1);
+  // Новые слова выбираются случайно (o.rnd — подмена генератора для тестов)
+  function shuffle(arr, rnd) {
+    rnd = rnd || Math.random;
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
 
   /*
    * Очередь занятия: сначала слова, которые не дали выучить в прошлый раз, затем подошедшие повторения
-   * (самые запоздавшие первыми), затем новые слова в пределах дневного лимита.
+   * (самые запоздавшие первыми), затем случайные новые слова в пределах дневного лимита.
    */
   function buildQueue(words, o) {
     const now = o.now == null ? Date.now() : o.now;
@@ -175,7 +183,7 @@
     }
     pend.sort((a, b) => (a.w.c || 0) - (b.w.c || 0));
     rev.sort((a, b) => a.due - b.due);
-    fresh.sort(byNew);
+    shuffle(fresh, o.rnd);
     const limit = Math.max(0, (o.newPerDay == null ? 10 : o.newPerDay) - introducedToday(words, today));
     const news = fresh.slice(0, limit);
     const items = []
@@ -190,16 +198,16 @@
     const now = o.now == null ? Date.now() : o.now;
     const today = dayNum(now);
     const dirs = o.dirs || { f: true, b: true };
-    let best = null;
+    const pool = [];
     for (const w of words) {
       if (w.d) continue;
       for (const k of cardsOf(w, dirs, today)) {
         if (exclude && exclude.has(w.id + ':' + k)) continue;
         if (!isNew(norm(w[k]))) continue;
-        const x = { w, k };
-        if (!best || byNew(x, best) < 0) best = x;
+        pool.push({ w, k });
       }
     }
+    const best = pool.length ? pool[Math.floor((o.rnd || Math.random)() * pool.length)] : null;
     return best ? { id: best.w.id, k: best.k, kind: 'new' } : null;
   }
 
@@ -214,6 +222,20 @@
       if (ks.length && ks.every((k) => w[k] && isMastered(w[k]))) mastered++;
     }
     return Object.assign({ total, mastered }, q.stats);
+  }
+
+  // Прогресс по набору слов: начато — хоть одна карточка уже показывалась; изучено — все включённые направления дошли до интервала в 3 недели
+  function progress(words, dirs) {
+    dirs = dirs || { f: true, b: true };
+    let total = 0, started = 0, learned = 0;
+    const ks = ['f', 'b'].filter((k) => dirs[k]);
+    for (const w of words) {
+      if (w.d) continue;
+      total++;
+      if (['f', 'b'].some((k) => w[k] && (norm(w[k]).lv > 0 || norm(w[k]).pend))) started++;
+      if (ks.length && ks.every((k) => w[k] && isMastered(w[k]))) learned++;
+    }
+    return { total, started, learned };
   }
 
   // Состояние слова для списка: new — не показывалось; due — пора повторить; learning — уровни до суток; review — выучивается
@@ -234,7 +256,7 @@
 
   EW.srs = {
     dayNum, blank, norm, level, answer, setLevel, isNew, dueAt, isMastered, intervalMs, maxLevel, maxDaysOf,
-    fmtInterval, fmtDue, preview, cardsOf, introducedToday, buildQueue, nextNew, stats, wordState, wordLevel,
+    fmtInterval, fmtDue, preview, cardsOf, introducedToday, buildQueue, nextNew, stats, progress, wordState, wordLevel,
     GAP, KNOWN_LEVEL, DEFAULT_MAX_DAYS,
   };
 })();

@@ -663,7 +663,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.3 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.5 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -717,13 +717,20 @@
     sh.innerHTML = dm.v === 'merge' ? mergeHTML() : dm.v === 'check' ? checkHTML() : dictsListHTML();
   }
   const wordsWord = (n) => { const a = n % 100, b = n % 10; return n + ' ' + (a > 10 && a < 15 ? 'слов' : b === 1 ? 'слово' : b > 1 && b < 5 ? 'слова' : 'слов'); };
+  function progHTML(wordsOf) {
+    const p = srs.progress(wordsOf, S().settings.dirs);
+    if (!p.total) return '';
+    const pc = (x) => Math.round((x / p.total) * 100);
+    return '<div class="prog" title="Начато — слово уже показывали. Изучено — повторение уже раз в 3 недели и реже."><div class="pbar"><i class="p1" style="width:' + pc(p.started) + '%"></i><i class="p2" style="width:' + pc(p.learned) + '%"></i></div>' +
+      '<div class="muted small">Начато: <b>' + pc(p.started) + '%</b> (' + p.started + ' из ' + p.total + ') · Изучено: <b>' + pc(p.learned) + '%</b> (' + p.learned + ')</div></div>';
+  }
   function dictsListHTML() {
-    const ds = liveDicts(), n = dictCounts(), cur = curId();
+    const ds = liveDicts(), n = dictCounts(), cur = curId(), res = core.dictResolver(), lw = liveWords();
     const rows = ds.map((d) => {
       if (dm.edit === d.id) {
         return '<form class="di" id="dm-renf" data-id="' + esc(d.id) + '" autocomplete="off"><input type="text" id="dm-ren" class="grow" maxlength="40" value="' + esc(d.name) + '"><button class="btn primary" type="submit">Сохранить</button><button type="button" class="btn" data-act="dm-ren-cancel">Отмена</button></form>';
       }
-      return '<div class="di"><div class="di-main"><div class="di-name">' + esc(d.name) + (d.id === cur ? '<span class="badge new">выбран</span>' : '') + '</div><div class="muted small">' + wordsWord(n[d.id] || 0) + '</div></div>' +
+      return '<div class="di"><div class="di-main"><div class="di-name">' + esc(d.name) + (d.id === cur ? '<span class="badge new">выбран</span>' : '') + '</div><div class="muted small">' + wordsWord(n[d.id] || 0) + '</div>' + progHTML(lw.filter((w) => res(w) === d.id)) + '</div>' +
         '<div class="di-btns">' + (d.id === cur ? '' : '<button type="button" class="btn" data-act="dm-pick" data-id="' + esc(d.id) + '">Открыть</button>') +
         '<button type="button" class="btn" data-act="dm-ren" data-id="' + esc(d.id) + '">Переименовать</button>' +
         '<button type="button" class="btn" data-act="dm-reset" data-id="' + esc(d.id) + '">Сбросить прогресс</button>' +

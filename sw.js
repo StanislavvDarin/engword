@@ -1,9 +1,9 @@
 /* English Words — service worker.
    Сначала сеть (чтобы обновления доходили сразу), кэш — только запасной вариант без интернета. */
-const CACHE = 'engword-v5';
+const CACHE = 'engword-v7';
 const FILES = [
-  './', 'index.html', 'style.css?v=5', 'core.js?v=5', 'srs.js?v=5', 'csv.js?v=5', 'tts.js?v=5', 'drive.js?v=5', 'app.js?v=5',
-  'manifest.webmanifest?v=5', 'privacy.html', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png',
+  './', 'index.html', 'style.css?v=7', 'core.js?v=7', 'srs.js?v=7', 'csv.js?v=7', 'tts.js?v=7', 'drive.js?v=7', 'app.js?v=7',
+  'manifest.webmanifest?v=7', 'privacy.html', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png',
 ];
 
 self.addEventListener('install', (e) => {

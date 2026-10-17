@@ -225,7 +225,7 @@
     $('#wlist').innerHTML = shown.length
       ? shown.map((w) => {
           const s = srs.wordState(w, now, opts());
-          const lv = srs.wordLevel(w, S().settings.dirs);
+          const lv = srs.wordLevel(w);
           return '<div class="wi" data-act="edit" data-id="' + esc(w.id) + '"><div class="wi-main"><div class="wi-en">' + esc(w.en) +
             (w.tr ? '<span class="wi-tr">[' + esc(w.tr) + ']</span>' : '') + '<span class="badge ' + s + '">' + STATE_LABEL[s] + '</span>' + (lv ? '<span class="badge lvl">ур. ' + lv + '</span>' : '') + '</div><div class="wi-ru">' + esc(w.ru) + (many ? ' <span class="wi-dict">· ' + esc(dictName(rs(w))) + '</span>' : '') + '</div></div>' +
             '<button class="icon-btn plain" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
@@ -278,13 +278,11 @@
   function levelHTML(w) {
     if (!w) return '';
     const o = opts();
-    const row = (k, title) => {
-      const c = srs.norm(w[k]);
-      return '<label class="lv-row">' + title + '<span class="lv-in"><input type="number" id="lv-' + k + '" min="0" max="' + srs.maxLevel(srs.maxDaysOf(o)) + '" value="' + c.lv + '"><span class="muted small">' +
-        (c.lv === 0 && !c.pend ? 'ещё не изучалось' : (srs.fmtDue(w[k], Date.now(), o) ? 'повтор: ' + srs.fmtDue(w[k], Date.now(), o) : '')) + '</span></span></label>';
-    };
+    const c = srs.cardOf(w);
+    const due = srs.fmtDue(c, Date.now(), o);
     return '<div class="sect"><div class="sect-h">Уровень изучения</div><p class="muted small" style="margin-top:0">0 — слово ещё не изучено. 1–3 — повтор через 10 минут, 1 час, 6 часов; 4 — через сутки; дальше каждый уровень добавляет сутки. Уровень можно поменять вручную.</p>' +
-      row('f', 'Английский → русский') + row('b', 'Русский → английский') + '</div>';
+      '<label class="lv-row">Уровень слова<span class="lv-in"><input type="number" id="lv-f" min="0" max="' + srs.maxLevel(srs.maxDaysOf(o)) + '" value="' + c.lv + '"><span class="muted small">' +
+      (c.lv === 0 && !c.pend ? 'ещё не изучалось' : (due ? 'повтор: ' + due : '')) + '</span></span></label></div>';
   }
   function exHTML() {
     return form.ex.map((e, i) =>
@@ -378,10 +376,8 @@
       if (!form.keep.includes(fid)) { const f = core.get('files', fid); if (f && !f.d) core.tomb('files', fid, { driveId: f.driveId }); }
     }
     if (old) {
-      for (const k of ['f', 'b']) {
-        const el = $('#lv-' + k);
-        if (el && el.value !== '' && Math.round(+el.value) !== srs.level(old[k])) w[k] = srs.setLevel(w[k], +el.value, now, opts());
-      }
+      const el = $('#lv-f');
+      if (el && el.value !== '' && Math.round(+el.value) !== srs.cardOf(old).lv) { w.f = srs.setLevel(srs.cardOf(old), +el.value, now, opts()); delete w.b; }
     }
     core.upsert('words', w);
     core.commit();
@@ -514,7 +510,7 @@
   function startStudy(mode) {
     const dict = curId();
     const q = srs.buildQueue(inScope(dict), Object.assign({ mode }, opts()));
-    study = { mode, done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
+    study = { mode, ws: {}, done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.body.classList.add('noscroll');
     nextCard();
@@ -533,17 +529,24 @@
     const w = getWord(study.cur.id);
     if (w && study.cur.k === 'b' && PR().autoSpeak) speakText(w.en);
   }
-  // know: true — «знаю», false — «не знаю»
+  // Состояние слова в этом занятии: сколько ошибок и в каких направлениях уже верно
+  function wsOf(id, w) {
+    if (!study.ws[id]) { const c = srs.cardOf(w); study.ws[id] = { miss: c.pend ? c.miss : 0, right: {}, fresh: c.lv === 0 && !c.pend }; }
+    return study.ws[id];
+  }
+  // know: true — «знаю», false — «не знаю». Слово засчитывается, когда верно во всех включённых направлениях.
   function grade(know) {
     if (!study || !study.cur || !study.revealed) return;
     const cur = study.cur;
     const w = getWord(cur.id);
     if (!w) { nextCard(); return; }
     const now = Date.now();
-    const prev = w[cur.k] ? JSON.parse(JSON.stringify(w[cur.k])) : null;
+    const D = srs.dirsOf(opts().dirs);
+    const prev = { f: w.f == null ? null : JSON.parse(JSON.stringify(w.f)), b: w.b == null ? null : JSON.parse(JSON.stringify(w.b)) };
     const queueBefore = study.queue.map((x) => Object.assign({}, x));
-    const wasNew = srs.isNew(srs.norm(w[cur.k]));
-    w[cur.k] = srs.answer(w[cur.k], know, now, opts());
+    const wsBefore = JSON.parse(JSON.stringify(study.ws[w.id] || null));
+    const ws = wsOf(w.id, w);
+    if (know) ws.right[cur.k] = true; else { ws.miss++; ws.right[cur.k] = false; }
     w.u = now;
     const dayId = 'd' + srs.dayNum();
     const day = core.get('days', dayId) || { id: dayId, n: 0, c: 0 };
@@ -551,16 +554,27 @@
     if (know) day.c++;
     core.upsert('days', day);
     study.queue.shift();
-    if (w[cur.k].pend) {
-      // «не знаю»: слово вернётся через несколько карточек, пока не ответят «знаю»
+    if (!know) {
+      // «не знаю»: это направление вернётся через несколько карточек, пока не ответят «знаю»
+      w.f = srs.failed(w.f != null ? w.f : w.b, ws.miss, now); delete w.b;
       study.queue.splice(Math.min(srs.GAP, study.queue.length), 0, { id: w.id, k: cur.k, kind: 'learn' });
-    } else if (wasNew && know) {
-      // новое слово оказалось знакомым — в занятие добавляется ещё одно новое
-      const inQ = new Set(study.queue.map((x) => x.id + ':' + x.k));
-      const more = srs.nextNew(inScope(study.dict), opts(), inQ);
-      if (more) study.queue.push(more);
+    } else if (D.every((d) => ws.right[d])) {
+      const wasNew = ws.fresh && ws.miss === 0;
+      w.f = srs.finish(w.f != null ? w.f : w.b, ws.miss, now, opts()); delete w.b;
+      if (wasNew) {
+        // новое слово оказалось знакомым — в занятие добавляется ещё одно новое
+        const inQ = new Set(study.queue.map((x) => x.id));
+        const more = srs.nextNew(inScope(study.dict), opts(), inQ);
+        if (more) {
+          study.queue.push(more[0]);
+          for (let n = 1; n < more.length; n++) study.queue.splice(Math.min(study.queue.length, study.queue.length - 1 + srs.GAP), 0, more[n]);
+        }
+      }
+    } else {
+      // осталось другое направление: если его нет в очереди (настройки поменяли посреди занятия), добавляем
+      for (const d of D) if (!ws.right[d] && !study.queue.some((x) => x.id === w.id && x.k === d)) study.queue.splice(Math.min(srs.GAP, study.queue.length), 0, { id: w.id, k: d, kind: cur.kind });
     }
-    study.last = { id: w.id, k: cur.k, prev, queue: queueBefore, dayId, good: know, cur };
+    study.last = { id: w.id, prev, queue: queueBefore, ws: wsBefore, dayId, good: know, cur };
     study.done++;
     if (know) study.correct++;
     core.commit();
@@ -570,7 +584,11 @@
     if (!study || !study.last) return;
     const l = study.last;
     const w = getWord(l.id);
-    if (w) { if (l.prev) w[l.k] = l.prev; else delete w[l.k]; w.u = Date.now(); }
+    if (w) {
+      for (const k of ['f', 'b']) { if (l.prev[k]) w[k] = l.prev[k]; else delete w[k]; }
+      w.u = Date.now();
+      if (l.ws) study.ws[l.id] = l.ws; else delete study.ws[l.id];
+    }
     const day = core.get('days', l.dayId);
     if (day) { day.n = Math.max(0, day.n - 1); if (l.good) day.c = Math.max(0, day.c - 1); core.upsert('days', day); }
     study.done = Math.max(0, study.done - 1);
@@ -601,7 +619,7 @@
       const w = getWord(cur.id);
       const f = cur.k === 'f';
       left = study.queue.length;
-      const lvNow = srs.level(w[cur.k]);
+      const lvNow = srs.cardOf(w).lv;
       const kind = (f ? 'Английский → русский' : 'Русский → английский') + (cur.kind === 'new' ? ' <span class="badge new">новое</span>' : '') + (cur.kind === 'learn' ? ' <span class="badge due">ещё раз</span>' : '') + (lvNow ? ' <span class="badge lvl">ур. ' + lvNow + '</span>' : '');
       body = '<div class="st-card"><div class="st-kind">' + kind + '</div>';
       if (f) body += '<div class="st-line"><div class="st-word" lang="en">' + esc(w.en) + '</div><button class="icon-btn" data-act="speak" data-text="' + esc(w.en) + '" aria-label="Произнести">' + I.speaker + '</button></div>';
@@ -618,7 +636,9 @@
       body += '</div>';
       if (!study.revealed) actions = '<button class="btn primary big" data-act="reveal">Показать ответ</button>';
       else {
-        const pv = srs.preview(w[cur.k], Date.now(), opts());
+        const wst = wsOf(w.id, w);
+        const more = srs.dirsOf(opts().dirs).some((d) => d !== cur.k && !wst.right[d]);
+        const pv = srs.preview(srs.cardOf(w), wst.miss, more, Date.now(), opts());
         actions = '<div class="grades two"><button class="grade g0" data-act="grade" data-know="0">Не знаю<small>' + esc(pv.no) + '</small></button>' +
           '<button class="grade g2" data-act="grade" data-know="1">Знаю<small>' + esc(pv.yes) + '</small></button></div>';
       }
@@ -655,7 +675,8 @@
       '<label>Максимальный интервал повторения, суток<input type="number" id="s-max" min="2" max="3650" value="' + s.maxDays + '"></label>' +
       '<p class="muted small" style="margin-top:-4px">Повторения идут через 10 минут, 1 час, 6 часов, 1, 2, 3 суток и так далее, каждый раз на сутки дольше, но не больше этого числа. Слово, о котором сразу ответили «знаю», в дневной лимит новых не входит.</p>' +
       '<label class="check"><input type="checkbox" id="s-df"' + (s.dirs.f ? ' checked' : '') + '>Английский → русский</label>' +
-      '<label class="check"><input type="checkbox" id="s-db"' + (s.dirs.b ? ' checked' : '') + '>Русский → английский</label></div>' +
+      '<label class="check"><input type="checkbox" id="s-db"' + (s.dirs.b ? ' checked' : '') + '>Русский → английский</label>' +
+      '<p class="muted small" style="margin:0">Если включены оба направления, слово засчитывается, когда вы ответили «знаю» в обе стороны. Направление, в котором ошиблись, повторяется в этом же занятии. Была хоть одна ошибка — уровень слова не растёт.</p></div>' +
       '<div class="card"><h3>Произношение</h3><p class="muted small" style="margin-top:0">Настройки переносятся между устройствами. Сами голоса берутся из устройства, поэтому на телефоне и компьютере они могут отличаться: если выбранного голоса нет, подберётся подходящий.</p>' +
       (tts.supported ? '' : '<div class="note err">Этот браузер не умеет озвучивать текст.</div>') +
       '<label>Акцент<select id="s-accent"><option value="en-US">Американский</option><option value="en-GB">Британский</option></select></label>' +
@@ -664,7 +685,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.7 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.8 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -719,7 +740,7 @@
   }
   const wordsWord = (n) => { const a = n % 100, b = n % 10; return n + ' ' + (a > 10 && a < 15 ? 'слов' : b === 1 ? 'слово' : b > 1 && b < 5 ? 'слова' : 'слов'); };
   function progHTML(wordsOf) {
-    const p = srs.progress(wordsOf, S().settings.dirs);
+    const p = srs.progress(wordsOf);
     if (!p.total) return '';
     const pc = (x) => Math.round((x / p.total) * 100);
     return '<div class="prog" title="Начато — слово уже показывали. Изучено — повторение уже раз в 3 недели и реже."><div class="pbar"><i class="p1" style="width:' + pc(p.started) + '%"></i><i class="p2" style="width:' + pc(p.learned) + '%"></i></div>' +
@@ -840,7 +861,7 @@
           t.ex = unionEx(t.ex, s.ex);
           t.fl = unionIds(t.fl, s.fl);
           if (!t.tr && s.tr) t.tr = s.tr;
-          for (const c of ['f', 'b']) if (s[c] && (!t[c] || srs.level(s[c]) > srs.level(t[c]))) t[c] = s[c];
+          { const sc = srs.cardOf(s), tc = srs.cardOf(t); if ((sc.lv > 0 || sc.pend) && sc.lv > tc.lv) { t.f = sc; delete t.b; } }
           t.u = now;
           core.tomb('words', s.id);
         }

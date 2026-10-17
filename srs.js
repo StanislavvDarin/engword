@@ -1,6 +1,11 @@
 /* English Words — уровни изучения и интервалы повторения. Чистые функции, без доступа к DOM.
  *
- * У каждой карточки (направление слова) есть УРОВЕНЬ изучения lv:
+ * У каждого СЛОВА один уровень изучения lv (хранится в w.f; старое поле w.b больше не используется).
+ * В занятии слово показывается во всех включённых направлениях (en→ru и ru→en). Слово засчитано, только когда верно
+ * отвечено в каждом направлении; направление, в котором ошиблись, повторяется в этом же занятии до «знаю».
+ * Если была хоть одна ошибка — уровень не растёт.
+ *
+ * Уровни:
  *   0 — слово ещё не выучено (не показывалось или проходит первое обучение);
  *   1, 2, 3 — следующее повторение через 10 минут, 1 час, 6 часов;
  *   4 — через сутки, 5 — через двое суток, 6 — через трое… (каждый уровень +1 сутки),
@@ -64,30 +69,39 @@
   }
   const isMastered = (card) => norm(card).lv >= 3 + MASTERED_DAYS;
 
+  // Карточка слова (уровень хранится в w.f; у старых данных может быть только w.b)
+  const cardOf = (w) => norm(w && w.f != null ? w.f : w && w.b);
+  // Включённые направления в порядке показа: сначала en→ru, потом ru→en
+  function dirsOf(dirs) {
+    const a = [];
+    if (!dirs || dirs.f) a.push('f');
+    if (!dirs || dirs.b) a.push('b');
+    return a.length ? a : ['f'];
+  }
+
   /*
-   * Ответ на карточку. know = true («знаю») или false («не знаю»). Возвращает новую карточку.
-   * Новое слово: «знаю» сразу → уровень 4; «не знаю» → слово вернётся в этом же занятии, пока не ответят «знаю», затем уровень 1.
-   * Повторение: «знаю» с первого раза → уровень +1; один «не знаю» перед «знаю» → уровень не меняется;
-   * два и больше «не знаю» → уровень на 1 ниже.
+   * Итог занятия по слову, когда оно верно отвечено во всех направлениях. miss — сколько раз за занятие ответили «не знаю».
+   * Новое слово: без ошибок → уровень 4 (считаем, что три повторения уже пройдены); с ошибками → уровень 1.
+   * Повторение: без ошибок → уровень +1; одна ошибка → уровень не меняется; две и больше → на 1 ниже.
    */
-  function answer(card, know, now, o) {
+  function finish(card, miss, now, o) {
     now = now == null ? Date.now() : now;
     const top = maxLevel(maxDaysOf(o));
     const c = norm(card);
     const today = dayNum(now);
     if (c.lv === 0) {
-      if (!c.pend) {
-        if (know) return Object.assign(c, { lv: Math.min(KNOWN_LEVEL, top), at: now, intro: today, ks: true, miss: 0, pend: false });
-        return Object.assign(c, { intro: today, ks: false, pend: true, miss: 1 });
-      }
-      if (know) return Object.assign(c, { lv: 1, at: now, miss: 0, pend: false });
-      return Object.assign(c, { miss: c.miss + 1 });
+      if (!miss) return Object.assign(c, { lv: Math.min(KNOWN_LEVEL, top), at: now, intro: today, ks: true, miss: 0, pend: false });
+      return Object.assign(c, { lv: 1, at: now, intro: c.intro || today, ks: false, miss: 0, pend: false });
     }
-    if (know) {
-      const lv = c.miss === 0 ? Math.min(c.lv + 1, top) : c.miss === 1 ? Math.min(c.lv, top) : Math.max(1, c.lv - 1);
-      return Object.assign(c, { lv, at: now, miss: 0, pend: false });
-    }
-    return Object.assign(c, { miss: c.miss + 1, pend: true });
+    const lv = !miss ? Math.min(c.lv + 1, top) : miss === 1 ? Math.min(c.lv, top) : Math.max(1, c.lv - 1);
+    return Object.assign(c, { lv, at: now, miss: 0, pend: false });
+  }
+  // «Не знаю» в занятии: слово не добито. Уровень не меняется, запоминаем число ошибок.
+  function failed(card, miss, now) {
+    now = now == null ? Date.now() : now;
+    const c = norm(card);
+    if (c.lv === 0) return Object.assign(c, { intro: c.intro || dayNum(now), ks: false, miss, pend: true });
+    return Object.assign(c, { miss, pend: true });
   }
 
   // Ручная смена уровня. 0 — слово снова становится новым.
@@ -117,37 +131,20 @@
     if (d <= now) return 'сейчас';
     return 'через ' + fmtInterval(d - now);
   }
-  // Подписи под кнопками: что будет после «знаю» / «не знаю»
-  function preview(card, now, o) {
-    const yes = answer(card, true, now, o);
+  // Подписи под кнопками. miss — ошибок по слову в этом занятии; more — осталось ли ещё направление
+  function preview(card, miss, more, now, o) {
+    if (more) return { yes: 'ещё в другую сторону', no: 'ещё раз сегодня' };
+    const yes = finish(card, miss, now, o);
     return { yes: 'ур. ' + yes.lv + ' · через ' + fmtInterval(intervalMs(yes.lv, maxDaysOf(o))), no: 'ещё раз сегодня' };
   }
 
-  // Какие карточки есть у слова при текущих настройках
-  function cardsOf(w, dirs, today) {
-    const out = [];
-    if (dirs.f) out.push('f');
-    if (dirs.b) {
-      // обратное направление открываем не раньше следующего дня после прямого
-      const f = norm(w.f);
-      if (!dirs.f || (f.lv > 0 && !f.pend && f.intro < today)) out.push('b');
-    }
-    return out;
-  }
-
-  /*
-   * Сколько новых карточек уже «потрачено» сегодня: считаются те, что показали впервые сегодня,
-   * кроме слов, о которых сразу ответили «знаю» (они в дневной лимит не входят).
-   */
+  /* Сколько новых слов уже «потрачено» сегодня: показанные впервые сегодня, кроме тех, что сразу ответили «знаю». */
   function introducedToday(words, today) {
     let n = 0;
     for (const w of words) {
       if (w.d) continue;
-      for (const k of ['f', 'b']) {
-        if (!w[k]) continue;
-        const c = norm(w[k]);
-        if ((c.lv > 0 || c.pend) && c.intro === today && !c.ks) n++;
-      }
+      const c = cardOf(w);
+      if ((c.lv > 0 || c.pend) && c.intro === today && !c.ks) n++;
     }
     return n;
   }
@@ -163,83 +160,81 @@
   }
 
   /*
-   * Очередь занятия: сначала слова, которые не дали выучить в прошлый раз, затем подошедшие повторения
-   * (самые запоздавшие первыми), затем случайные новые слова в пределах дневного лимита.
+   * Очередь занятия: слова, которые не дали выучить в прошлый раз, затем подошедшие повторения (самые запоздавшие первыми),
+   * затем случайные новые слова в пределах дневного лимита. Каждое слово даёт по карточке на каждое включённое направление;
+   * вторая карточка слова стоит через несколько других.
+   * o.mode: 'new' — только новые, 'review' — только повторение, иначе всё вместе.
    */
   function buildQueue(words, o) {
     const now = o.now == null ? Date.now() : o.now;
     const today = dayNum(now);
-    const dirs = o.dirs || { f: true, b: true };
+    const D = dirsOf(o.dirs);
     const md = maxDaysOf(o);
-    const pend = [], rev = [], fresh = [];
-    const mode = o.mode; // 'new' — только учим новые; 'review' — только повторяем; иначе всё вместе
+    const mode = o.mode;
+    const pendN = [], pendR = [], rev = [], fresh = [];
     for (const w of words) {
       if (w.d) continue;
-      for (const k of cardsOf(w, dirs, today)) {
-        const c = norm(w[k]);
-        if (c.pend) pend.push({ w, k });
-        else if (c.lv > 0) { const d = c.at + intervalMs(c.lv, md); if (d <= now) rev.push({ w, k, due: d }); }
-        else fresh.push({ w, k });
-      }
+      const c = cardOf(w);
+      if (c.pend) (c.lv === 0 ? pendN : pendR).push({ w });
+      else if (c.lv > 0) { const d = c.at + intervalMs(c.lv, md); if (d <= now) rev.push({ w, due: d }); }
+      else fresh.push({ w });
     }
-    pend.sort((a, b) => (a.w.c || 0) - (b.w.c || 0));
+    const byC = (a, b) => (a.w.c || 0) - (b.w.c || 0);
+    pendN.sort(byC); pendR.sort(byC);
     rev.sort((a, b) => a.due - b.due);
     shuffle(fresh, o.rnd);
     const limit = Math.max(0, (o.newPerDay == null ? 10 : o.newPerDay) - introducedToday(words, today));
     const news = fresh.slice(0, limit);
-    // «ещё раз» для слова, которое ещё не выучено с нуля, относится к новым; для слова с уровнем — к повторению
-    const pendNew = pend.filter((x) => norm(x.w[x.k]).lv === 0), pendRev = pend.filter((x) => norm(x.w[x.k]).lv > 0);
-    const L = (x) => ({ id: x.w.id, k: x.k, kind: 'learn' });
-    let items = [];
-    if (mode !== 'new') items = items.concat(pendRev.map(L));
-    if (mode === 'new') items = items.concat(pendNew.map(L));
-    else if (!mode) items = items.concat(pendNew.map(L));
-    if (mode !== 'new') items = items.concat(rev.map((x) => ({ id: x.w.id, k: x.k, kind: 'review' })));
-    if (mode !== 'review') items = items.concat(news.map((x) => ({ id: x.w.id, k: x.k, kind: 'new' })));
-    return { items, stats: { learn: pend.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendRev.length + rev.length, newTotal: pendNew.length + news.length } };
+    const units = [];
+    const U = (arr, kind) => arr.forEach((x) => units.push({ id: x.w.id, kind }));
+    if (mode !== 'new') U(pendR, 'learn');
+    if (mode !== 'review') U(pendN, 'learn');
+    if (mode !== 'new') U(rev, 'review');
+    if (mode !== 'review') U(news, 'new');
+    const items = units.map((u) => ({ id: u.id, k: D[0], kind: u.kind }));
+    if (D.length > 1) {
+      for (const u of units) {
+        const i = items.findIndex((x) => x.id === u.id && x.k === D[0]);
+        items.splice(Math.min(i + 1 + GAP, items.length), 0, { id: u.id, k: D[1], kind: u.kind });
+      }
+    }
+    return { items, stats: { learn: pendN.length + pendR.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendR.length + rev.length, newTotal: pendN.length + news.length } };
   }
 
-  // Ещё одно новое слово для занятия (когда прежнее оказалось уже знакомым). exclude — множество «id:k», которые уже в очереди.
+  // Ещё одно новое слово для занятия (когда прежнее оказалось знакомым). exclude — множество id слов, которые уже в очереди.
   function nextNew(words, o, exclude) {
-    const now = o.now == null ? Date.now() : o.now;
-    const today = dayNum(now);
-    const dirs = o.dirs || { f: true, b: true };
     const pool = [];
     for (const w of words) {
       if (w.d) continue;
-      for (const k of cardsOf(w, dirs, today)) {
-        if (exclude && exclude.has(w.id + ':' + k)) continue;
-        if (!isNew(norm(w[k]))) continue;
-        pool.push({ w, k });
-      }
+      if (exclude && exclude.has(w.id)) continue;
+      const c = cardOf(w);
+      if (c.lv === 0 && !c.pend) pool.push(w);
     }
-    const best = pool.length ? pool[Math.floor((o.rnd || Math.random)() * pool.length)] : null;
-    return best ? { id: best.w.id, k: best.k, kind: 'new' } : null;
+    if (!pool.length) return null;
+    const w = pool[Math.floor((o.rnd || Math.random)() * pool.length)];
+    return dirsOf(o.dirs).map((k) => ({ id: w.id, k, kind: 'new' }));
   }
 
   function stats(words, o) {
     const q = buildQueue(words, o);
-    const dirs = o.dirs || { f: true, b: true };
     let total = 0, mastered = 0;
     for (const w of words) {
       if (w.d) continue;
       total++;
-      const ks = ['f', 'b'].filter((k) => dirs[k]);
-      if (ks.length && ks.every((k) => w[k] && isMastered(w[k]))) mastered++;
+      if (isMastered(cardOf(w))) mastered++;
     }
     return Object.assign({ total, mastered }, q.stats);
   }
 
-  // Прогресс по набору слов: начато — хоть одна карточка уже показывалась; изучено — все включённые направления дошли до интервала в 3 недели
-  function progress(words, dirs) {
-    dirs = dirs || { f: true, b: true };
+  // Прогресс по набору слов: начато — слово уже показывали; изучено — повторение раз в 3 недели и реже
+  function progress(words) {
     let total = 0, started = 0, learned = 0;
-    const ks = ['f', 'b'].filter((k) => dirs[k]);
     for (const w of words) {
       if (w.d) continue;
       total++;
-      if (['f', 'b'].some((k) => w[k] && (norm(w[k]).lv > 0 || norm(w[k]).pend))) started++;
-      if (ks.length && ks.every((k) => w[k] && isMastered(w[k]))) learned++;
+      const c = cardOf(w);
+      if (c.lv > 0 || c.pend) started++;
+      if (isMastered(c)) learned++;
     }
     return { total, started, learned };
   }
@@ -247,22 +242,17 @@
   // Состояние слова для списка: new — не показывалось; due — пора повторить; learning — уровни до суток; review — выучивается
   function wordState(w, now, o) {
     now = now == null ? Date.now() : now;
-    const md = maxDaysOf(o);
-    const cs = ['f', 'b'].map((k) => w[k]).filter(Boolean).map(norm).filter((c) => c.lv > 0 || c.pend);
-    if (!cs.length) return 'new';
-    if (cs.some((c) => c.pend || c.at + intervalMs(c.lv, md) <= now)) return 'due';
-    if (cs.some((c) => c.lv < 4)) return 'learning';
+    const c = cardOf(w);
+    if (!(c.lv > 0 || c.pend)) return 'new';
+    if (c.pend || c.at + intervalMs(c.lv, maxDaysOf(o)) <= now) return 'due';
+    if (c.lv < 4) return 'learning';
     return 'review';
   }
-  // Уровень слова для списка: по основному направлению (если оно отключено — по обратному)
-  function wordLevel(w, dirs) {
-    const k = !dirs || dirs.f || !dirs.b ? 'f' : 'b';
-    return level(w[k]);
-  }
+  const wordLevel = (w) => cardOf(w).lv;
 
   EW.srs = {
-    dayNum, blank, norm, level, answer, setLevel, isNew, dueAt, isMastered, intervalMs, maxLevel, maxDaysOf,
-    fmtInterval, fmtDue, preview, cardsOf, introducedToday, buildQueue, nextNew, stats, progress, wordState, wordLevel,
+    dayNum, blank, norm, level, cardOf, dirsOf, finish, failed, setLevel, isNew, dueAt, isMastered, intervalMs, maxLevel, maxDaysOf,
+    fmtInterval, fmtDue, preview, introducedToday, buildQueue, nextNew, stats, progress, wordState, wordLevel,
     GAP, KNOWN_LEVEL, DEFAULT_MAX_DAYS,
   };
 })();

@@ -664,7 +664,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.6 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.7 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -715,7 +715,7 @@
   function renderDm() {
     const sh = $('#modal-root .sheet');
     if (!sh || !dm) return;
-    sh.innerHTML = dm.v === 'merge' ? mergeHTML() : dm.v === 'check' ? checkHTML() : dictsListHTML();
+    sh.innerHTML = dm.v === 'merge' ? mergeHTML() : dm.v === 'check' ? checkHTML() : dm.v === 'shared' ? sharedHTML() : dictsListHTML();
   }
   const wordsWord = (n) => { const a = n % 100, b = n % 10; return n + ' ' + (a > 10 && a < 15 ? 'слов' : b === 1 ? 'слово' : b > 1 && b < 5 ? 'слова' : 'слов'); };
   function progHTML(wordsOf) {
@@ -741,7 +741,7 @@
     return '<h2>Словари</h2><p class="muted small" style="margin-top:0">Занятия, повторения и список слов показывают только выбранный словарь. Одно и то же слово может быть в разных словарях.</p>' +
       '<form class="row" id="dmf" autocomplete="off" style="margin-bottom:12px"><input type="text" id="dm-new" class="grow" maxlength="40" placeholder="Название нового словаря"><button class="btn primary" type="submit">Создать</button></form>' +
       '<div class="note err" id="dm-err" hidden></div><div class="dlist">' + rows + '</div>' +
-      '<div class="row wrap" style="margin-top:12px"><button type="button" class="btn" data-act="dm-merge"' + (ds.length > 1 ? '' : ' disabled') + '>Слить словари…</button><button type="button" class="btn" data-act="dm-check">Проверить повторы</button></div>' +
+      '<div class="row wrap" style="margin-top:12px"><button type="button" class="btn" data-act="dm-merge"' + (ds.length > 1 ? '' : ' disabled') + '>Слить словари…</button><button type="button" class="btn" data-act="dm-check">Проверить повторы</button><button type="button" class="btn" data-act="dm-shared">Добавить готовый</button></div>' +
       '<div class="actions"><button type="button" class="btn" data-act="modal-close">Закрыть</button></div>';
   }
   function dmErr(msg) { const e = $('#dm-err'); if (e) { e.hidden = !msg; e.textContent = msg || ''; } }
@@ -886,6 +886,68 @@
     renderDm();
     toast('Готово. Перенесено: ' + r.moved + (r.merged + r.replaced ? ', повторов объединено: ' + (r.merged + r.replaced) : ''));
   }
+  /* ---------- готовые словари (папка shared на GitHub) ---------- */
+  function openShared() {
+    dm.v = 'shared';
+    renderDm();
+    if (dm.sh && dm.sh.state === 'ok') return;
+    dm.sh = { state: 'loading', items: [] };
+    const my = dm.sh;
+    const getText = (url) => fetch(url, { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((b) => csv.decode(b));
+    fetch('shared/index.json', { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((j) => Promise.all((j.dicts || []).filter((d) => d && d.id && d.file && d.name).map((d) =>
+        getText('shared/' + encodeURIComponent(d.file)).then((t) => ({ id: String(d.id), name: String(d.name), desc: String(d.desc || ''), rows: csv.parse(t).rows })).catch(() => null))))
+      .then((items) => { my.items = items.filter(Boolean); my.state = 'ok'; })
+      .catch(() => { my.state = 'err'; })
+      .then(() => { if (dm && dm.v === 'shared') renderDm(); });
+  }
+  function sharedHTML() {
+    const sh = dm.sh || { state: 'loading', items: [] };
+    let h = '<h2>Готовые словари</h2><p class="muted small" style="margin-top:0">Словари, которые выложены для всех. Нажмите «Добавить», и слова скопируются в ваши словари. Прогресс у вас будет свой.</p>';
+    if (sh.state === 'loading') h += '<div class="note info">Загружаю список…</div>';
+    else if (sh.state === 'err') h += '<div class="note err">Не удалось загрузить список. Проверьте интернет и попробуйте ещё раз.</div>';
+    else if (!sh.items.length) h += '<div class="note info">Пока нет готовых словарей.</div>';
+    else {
+      h += '<div class="dlist">' + sh.items.map((s) => {
+        const mine = liveDicts().find((d) => d.src === s.id);
+        let miss = 0;
+        if (mine) { const have = new Set(wordsOfDict(mine.id).map((w) => normEn(w.en))); miss = s.rows.filter((r) => !have.has(normEn(r.en))).length; }
+        return '<div class="di"><div class="di-main"><div class="di-name">' + esc(s.name) + (mine ? '<span class="badge review">добавлен</span>' : '') + '</div>' +
+          '<div class="muted small">' + wordsWord(s.rows.length) + (s.desc ? ' · ' + esc(s.desc) : '') + '</div>' +
+          (mine && miss ? '<div class="muted small">В готовом появилось новых слов: ' + miss + '</div>' : '') + '</div>' +
+          '<div class="di-btns">' + (!mine ? '<button type="button" class="btn primary" data-act="sh-add" data-id="' + esc(s.id) + '">Добавить</button>'
+            : miss ? '<button type="button" class="btn primary" data-act="sh-add" data-id="' + esc(s.id) + '">Добавить новые слова</button>' : '') + '</div></div>';
+      }).join('') + '</div>';
+    }
+    return h + '<div class="actions"><button type="button" class="btn" data-act="dm-back">Назад</button></div>';
+  }
+  function addShared(id) {
+    const s = dm && dm.sh && dm.sh.items.find((x) => x.id === id);
+    if (!s) return;
+    const now = Date.now();
+    let d = liveDicts().find((x) => x.src === id);
+    const isNew = !d;
+    if (!d) {
+      let name = s.name.slice(0, 40);
+      if (dictNameError(name)) name = (name.slice(0, 31) + ' (готовый)').slice(0, 40);
+      let n = 2;
+      while (dictNameError(name)) name = (s.name.slice(0, 33) + ' (' + n++ + ')').slice(0, 40);
+      d = core.upsert('dicts', { id: core.uid(), name, c: now, src: id });
+    }
+    const have = new Set(wordsOfDict(d.id).map((w) => normEn(w.en)));
+    let added = 0;
+    s.rows.forEach((r, i) => {
+      const k = normEn(r.en);
+      if (have.has(k)) return;
+      have.add(k);
+      core.S.words.push({ id: core.uid(), en: r.en, ru: r.ru, tr: r.tr, ex: r.ex, fl: [], dict: d.id, c: now + i / 1000, u: now });
+      added++;
+    });
+    if (isNew) setCur(d.id);
+    core.commit();
+    renderDm();
+    toast((isNew ? 'Словарь «' + d.name + '» добавлен и выбран. ' : '') + 'Слов добавлено: ' + added);
+  }
   function checkHTML() {
     const rs = core.dictResolver();
     const g = new Map();
@@ -915,6 +977,8 @@
     'dm-reset': (el) => resetDict(el.dataset.id),
     'dm-merge': () => { dm.v = 'merge'; renderDm(); },
     'dm-mergefrom': (el) => { dm.v = 'merge'; dm.src = el.dataset.id; dm.dst = ''; renderDm(); },
+    'dm-shared': () => openShared(),
+    'sh-add': (el) => addShared(el.dataset.id),
     'dm-check': () => { dm.v = 'check'; renderDm(); },
     'mg-go': () => doMerge(),
     add: () => openWordForm(),

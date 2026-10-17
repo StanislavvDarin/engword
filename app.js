@@ -185,7 +185,8 @@
       '<div class="stat"><b id="n-new">' + st.newLeft + '</b><span>новых на сегодня</span></div>' +
       '<div class="stat"><b>' + st.total + '</b><span>всего слов</span></div>' +
       '<div class="stat"><b>' + st.mastered + '</b><span>прочно выучено</span></div></div>' +
-      '<button class="btn primary big" data-act="study-start"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Начать занятие' : 'На сегодня всё') + '</button>' +
+      '<div class="study-btns"><button class="btn primary big" data-act="study-start" data-mode="review"' + (st.reviewTotal ? '' : ' disabled') + '>Повторять слова<small>' + (st.reviewTotal ? 'готово: ' + st.reviewTotal : 'пока нечего') + '</small></button>' +
+      '<button class="btn primary big alt" data-act="study-start" data-mode="new"' + (st.newTotal ? '' : ' disabled') + '>Учить новые слова<small>' + (st.newTotal ? 'на сегодня: ' + st.newTotal : (st.newEligible ? 'лимит на сегодня выбран' : 'новых слов нет')) + '</small></button></div>' +
       (todo ? '' : '<p class="muted small" style="text-align:center;margin:10px 0 0">Следующие карточки появятся по расписанию. Можно добавить новые слова.</p>') +
       '</div>' +
       '<div class="card"><h3>Активность</h3><div class="muted small">Сегодня повторено: ' + todayN + (sk ? ' · дней подряд: ' + sk : '') + '</div>' +
@@ -510,10 +511,10 @@
   }
 
   /* ---------- занятие ---------- */
-  function startStudy() {
+  function startStudy(mode) {
     const dict = curId();
-    const q = srs.buildQueue(inScope(dict), opts());
-    study = { done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
+    const q = srs.buildQueue(inScope(dict), Object.assign({ mode }, opts()));
+    study = { mode, done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.body.classList.add('noscroll');
     nextCard();
@@ -663,7 +664,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.5 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.6 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -947,7 +948,7 @@
       const nm = liveDicts().length > 1 ? '-' + scopeLabel(sc).replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '') : '';
       download('eng-word' + nm + '-' + dateStr() + '.csv', csv.stringify(ws));
     },
-    'study-start': () => startStudy(),
+    'study-start': (el) => startStudy(el && el.dataset.mode),
     'study-close': () => closeStudy(),
     reveal: () => reveal(),
     grade: (el) => grade(el.dataset.know === '1'),

@@ -172,6 +172,7 @@
     const dirs = o.dirs || { f: true, b: true };
     const md = maxDaysOf(o);
     const pend = [], rev = [], fresh = [];
+    const mode = o.mode; // 'new' — только учим новые; 'review' — только повторяем; иначе всё вместе
     for (const w of words) {
       if (w.d) continue;
       for (const k of cardsOf(w, dirs, today)) {
@@ -186,11 +187,16 @@
     shuffle(fresh, o.rnd);
     const limit = Math.max(0, (o.newPerDay == null ? 10 : o.newPerDay) - introducedToday(words, today));
     const news = fresh.slice(0, limit);
-    const items = []
-      .concat(pend.map((x) => ({ id: x.w.id, k: x.k, kind: 'learn' })))
-      .concat(rev.map((x) => ({ id: x.w.id, k: x.k, kind: 'review' })))
-      .concat(news.map((x) => ({ id: x.w.id, k: x.k, kind: 'new' })));
-    return { items, stats: { learn: pend.length, review: rev.length, newLeft: news.length, newEligible: fresh.length } };
+    // «ещё раз» для слова, которое ещё не выучено с нуля, относится к новым; для слова с уровнем — к повторению
+    const pendNew = pend.filter((x) => norm(x.w[x.k]).lv === 0), pendRev = pend.filter((x) => norm(x.w[x.k]).lv > 0);
+    const L = (x) => ({ id: x.w.id, k: x.k, kind: 'learn' });
+    let items = [];
+    if (mode !== 'new') items = items.concat(pendRev.map(L));
+    if (mode === 'new') items = items.concat(pendNew.map(L));
+    else if (!mode) items = items.concat(pendNew.map(L));
+    if (mode !== 'new') items = items.concat(rev.map((x) => ({ id: x.w.id, k: x.k, kind: 'review' })));
+    if (mode !== 'review') items = items.concat(news.map((x) => ({ id: x.w.id, k: x.k, kind: 'new' })));
+    return { items, stats: { learn: pend.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendRev.length + rev.length, newTotal: pendNew.length + news.length } };
   }
 
   // Ещё одно новое слово для занятия (когда прежнее оказалось уже знакомым). exclude — множество «id:k», которые уже в очереди.

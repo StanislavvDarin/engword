@@ -239,3 +239,5 @@ details.dups { margin-bottom: 12px; }
 .study-btns .btn.big small { font-size: .75rem; font-weight: 500; opacity: .85; }
 .study-btns .btn.big.alt { background: var(--ok); border-color: var(--ok); }
 .study-btns .btn.big:disabled { background: var(--bg); color: var(--muted); border-color: var(--line, #d5dbe7); opacity: 1; }
+
+.study-btns .btn.big:not(.primary) { background: var(--card, #fff); color: var(--text); border: 1px solid var(--line, #d5dbe7); }

@@ -186,7 +186,8 @@
       '<div class="stat"><b>' + st.total + '</b><span>всего слов</span></div>' +
       '<div class="stat"><b>' + st.mastered + '</b><span>прочно выучено</span></div></div>' +
       '<div class="study-btns"><button class="btn primary big" data-act="study-start" data-mode="review"' + (st.reviewTotal ? '' : ' disabled') + '>Повторять слова<small>' + (st.reviewTotal ? 'готово: ' + st.reviewTotal : 'пока нечего') + '</small></button>' +
-      '<button class="btn primary big alt" data-act="study-start" data-mode="new"' + (st.newTotal ? '' : ' disabled') + '>Учить новые слова<small>' + (st.newTotal ? 'на сегодня: ' + st.newTotal : (st.newEligible ? 'лимит на сегодня выбран' : 'новых слов нет')) + '</small></button></div>' +
+      '<button class="btn primary big alt" data-act="study-start" data-mode="new"' + (st.newTotal ? '' : ' disabled') + '>Учить новые слова<small>' + (st.newTotal ? 'на сегодня: ' + st.newTotal : (st.newEligible ? 'лимит на сегодня выбран' : 'новых слов нет')) + '</small></button>' +
+      (!st.newLeft && st.newEligible ? '<button class="btn big" data-act="more-new">Изучить новые слова сегодня<small>ещё можно: ' + wordsWord(st.newEligible) + '</small></button>' : '') + '</div>' +
       (todo ? '' : '<p class="muted small" style="text-align:center;margin:10px 0 0">Следующие карточки появятся по расписанию. Можно добавить новые слова.</p>') +
       '</div>' +
       '<div class="card"><h3>Активность</h3><div class="muted small">Сегодня повторено: ' + todayN + (sk ? ' · дней подряд: ' + sk : '') + '</div>' +
@@ -507,9 +508,28 @@
   }
 
   /* ---------- занятие ---------- */
-  function startStudy(mode) {
+  // Окно «Изучить новые слова сегодня»: сверх дневного лимита
+  function openMoreNew() {
+    const st = srs.stats(scopeWords(), opts());
+    if (!st.newEligible) { toast('Новых слов в этом словаре больше нет'); return; }
+    const max = st.newEligible, def = Math.min(max, Math.max(1, PR().newPerDay || 10));
+    openModal('<h2>Изучить новые слова сегодня</h2><p class="muted small" style="margin-top:0">Дневной лимит новых слов уже выбран. Сколько ещё слов выучить сегодня? Они выбираются случайно из словаря. Всего ещё не начато: ' + max + '.</p>' +
+      '<form id="mnf" autocomplete="off" novalidate><label>Количество слов<input type="number" id="mn-n" min="1" max="' + max + '" value="' + def + '" inputmode="numeric"></label>' +
+      '<div class="row wrap" style="margin-bottom:8px">' + [5, 10, 20, 50].filter((n) => n < max).map((n) => '<button type="button" class="btn" data-act="mn-set" data-n="' + n + '">' + n + '</button>').join('') + '<button type="button" class="btn" data-act="mn-set" data-n="' + max + '">Все (' + max + ')</button></div>' +
+      '<div class="note err" id="mn-err" hidden></div>' +
+      '<div class="actions"><button type="button" class="btn" data-act="modal-close">Отмена</button><button type="submit" class="btn primary">Начать</button></div></form>');
+    const e = $('#mn-n'); if (e) { e.focus(); e.select(); }
+  }
+  function startMoreNew() {
+    const st = srs.stats(scopeWords(), opts());
+    const n = Math.round(+$('#mn-n').value);
+    if (!(n >= 1)) { const e = $('#mn-err'); e.hidden = false; e.textContent = 'Введите число от 1 до ' + st.newEligible; return; }
+    closeModal();
+    startStudy('new', Math.min(n, st.newEligible));
+  }
+  function startStudy(mode, extra) {
     const dict = curId();
-    const q = srs.buildQueue(inScope(dict), Object.assign({ mode }, opts()));
+    const q = srs.buildQueue(inScope(dict), Object.assign({ mode, extraNew: extra }, opts()));
     study = { mode, ws: {}, done: 0, correct: 0, cur: null, revealed: false, last: null, dict, queue: q.items };
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.body.classList.add('noscroll');
@@ -557,7 +577,7 @@
     if (!know) {
       // «не знаю»: это направление вернётся через несколько карточек, пока не ответят «знаю»
       w.f = srs.failed(w.f != null ? w.f : w.b, ws.miss, now); delete w.b;
-      study.queue.splice(Math.min(srs.GAP, study.queue.length), 0, { id: w.id, k: cur.k, kind: 'learn' });
+      srs.insertCards(study.queue, [{ id: w.id, k: cur.k, kind: 'learn' }], null, 9);
     } else if (D.every((d) => ws.right[d])) {
       const wasNew = ws.fresh && ws.miss === 0;
       w.f = srs.finish(w.f != null ? w.f : w.b, ws.miss, now, opts()); delete w.b;
@@ -565,14 +585,11 @@
         // новое слово оказалось знакомым — в занятие добавляется ещё одно новое
         const inQ = new Set(study.queue.map((x) => x.id));
         const more = srs.nextNew(inScope(study.dict), opts(), inQ);
-        if (more) {
-          study.queue.push(more[0]);
-          for (let n = 1; n < more.length; n++) study.queue.splice(Math.min(study.queue.length, study.queue.length - 1 + srs.GAP), 0, more[n]);
-        }
+        if (more) srs.insertCards(study.queue, more);
       }
     } else {
       // осталось другое направление: если его нет в очереди (настройки поменяли посреди занятия), добавляем
-      for (const d of D) if (!ws.right[d] && !study.queue.some((x) => x.id === w.id && x.k === d)) study.queue.splice(Math.min(srs.GAP, study.queue.length), 0, { id: w.id, k: d, kind: cur.kind });
+      for (const d of D) if (!ws.right[d] && !study.queue.some((x) => x.id === w.id && x.k === d)) srs.insertCards(study.queue, [{ id: w.id, k: d, kind: cur.kind }], null, 9);
     }
     study.last = { id: w.id, prev, queue: queueBefore, ws: wsBefore, dayId, good: know, cur };
     study.done++;
@@ -685,7 +702,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 1.8 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 2.0 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();
@@ -1007,6 +1024,8 @@
     speak: (el) => speakText(el.dataset.text),
     more: () => { wordsUI.limit += 80; renderWordList(); },
     'modal-close': () => closeModal(),
+    'more-new': () => openMoreNew(),
+    'mn-set': (el) => { const e = $('#mn-n'); if (e) e.value = el.dataset.n; },
     'viewer-close': () => closeViewer(),
     'viewer-bg': (el, e) => { if (e.target === el) closeViewer(); },
     'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
@@ -1056,6 +1075,7 @@
     const id = e.target.id;
     if (id === 'wf') { e.preventDefault(); saveWord(false); }
     else if (id === 'dmf') { e.preventDefault(); createDict($('#dm-new').value); }
+    else if (id === 'mnf') { e.preventDefault(); startMoreNew(); }
     else if (id === 'dm-renf') { e.preventDefault(); renameDict(e.target.dataset.id, $('#dm-ren').value); }
   });
   document.addEventListener('input', (e) => {

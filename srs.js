@@ -183,7 +183,8 @@
     pendN.sort(byC); pendR.sort(byC);
     rev.sort((a, b) => a.due - b.due);
     shuffle(fresh, o.rnd);
-    const limit = Math.max(0, (o.newPerDay == null ? 10 : o.newPerDay) - introducedToday(words, today));
+    // o.extraNew — «изучить ещё сегодня»: берём столько новых слов, сколько попросили, дневной лимит не учитывается
+    const limit = o.extraNew != null ? Math.max(0, Math.floor(o.extraNew)) : Math.max(0, (o.newPerDay == null ? 10 : o.newPerDay) - introducedToday(words, today));
     const news = fresh.slice(0, limit);
     const units = [];
     const U = (arr, kind) => arr.forEach((x) => units.push({ id: x.w.id, kind }));
@@ -191,14 +192,64 @@
     if (mode !== 'review') U(pendN, 'learn');
     if (mode !== 'new') U(rev, 'review');
     if (mode !== 'review') U(news, 'new');
-    const items = units.map((u) => ({ id: u.id, k: D[0], kind: u.kind }));
-    if (D.length > 1) {
-      for (const u of units) {
-        const i = items.findIndex((x) => x.id === u.id && x.k === D[0]);
-        items.splice(Math.min(i + 1 + GAP, items.length), 0, { id: u.id, k: D[1], kind: u.kind });
-      }
-    }
+    // Порядок полностью случайный: слова вперемешку, направление каждой карточки и очерёдность направлений тоже случайные,
+    // две карточки одного слова не стоят рядом
+    shuffle(units, o.rnd);
+    const items = [];
+    for (const u of units) for (const k of D) items.push({ id: u.id, k, kind: u.kind });
+    spread(shuffle(items, o.rnd), o.rnd);
     return { items, stats: { learn: pendN.length + pendR.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendR.length + rev.length, newTotal: pendN.length + news.length } };
+  }
+
+  // Расталкивает карточки одного слова: между ними должно быть хотя бы несколько других (если очередь достаточно длинная)
+  function spread(items, rnd) {
+    rnd = rnd || Math.random;
+    const n = items.length;
+    const gap = Math.min(3, Math.floor(n / 4));
+    if (gap < 1) return items;
+    const bad = (i) => { for (let d = 1; d <= gap; d++) { if (i - d >= 0 && items[i - d].id === items[i].id) return true; if (i + d < n && items[i + d].id === items[i].id) return true; } return false; };
+    for (let pass = 0; pass < 50; pass++) {
+      let fixed = true;
+      for (let i = 0; i < n; i++) {
+        if (!bad(i)) continue;
+        fixed = false;
+        for (let t = 0; t < 30; t++) {
+          const j = Math.floor(rnd() * n);
+          if (j === i) continue;
+          const a = items[i]; items[i] = items[j]; items[j] = a;
+          if (!bad(i) && !bad(j)) break;
+          const b = items[i]; items[i] = items[j]; items[j] = b;
+        }
+      }
+      if (fixed) break;
+    }
+    return items;
+  }
+
+  /*
+   * Вставляет карточки слова в очередь в случайные места так, чтобы между двумя карточками одного слова стояли другие.
+   * maxAhead — если задано, место ищется не дальше этого числа карточек от начала (для возврата после «не знаю»).
+   */
+  function insertCards(queue, cards, rnd, maxAhead) {
+    rnd = rnd || Math.random;
+    for (const c of shuffle(cards.slice(), rnd)) {
+      const twins = [];
+      queue.forEach((x, i) => { if (x.id === c.id) twins.push(i); });
+      const gap = Math.min(3, Math.max(1, Math.floor(queue.length / 3)));
+      const okAt = (k) => twins.every((p) => k <= p - gap || k > p + gap);
+      let cand = [];
+      const hi = maxAhead == null ? queue.length : Math.min(queue.length, maxAhead);
+      const lo = maxAhead == null ? 0 : Math.min(2, hi);
+      for (let k = lo; k <= hi; k++) if (okAt(k)) cand.push(k);
+      if (!cand.length && maxAhead != null) for (let k = 0; k <= queue.length; k++) if (okAt(k)) cand.push(k);
+      if (!cand.length) { // места нет (очередь совсем короткая) — берём самое дальнее от второй карточки слова
+        let best = -1, bd = -1;
+        for (let k = 0; k <= queue.length; k++) { const d = Math.min.apply(null, twins.map((p) => Math.abs(k - p - 0.5))); if (d > bd) { bd = d; best = k; } }
+        cand = [best];
+      }
+      queue.splice(cand[Math.floor(rnd() * cand.length)], 0, c);
+    }
+    return queue;
   }
 
   // Ещё одно новое слово для занятия (когда прежнее оказалось знакомым). exclude — множество id слов, которые уже в очереди.
@@ -252,7 +303,7 @@
 
   EW.srs = {
     dayNum, blank, norm, level, cardOf, dirsOf, finish, failed, setLevel, isNew, dueAt, isMastered, intervalMs, maxLevel, maxDaysOf,
-    fmtInterval, fmtDue, preview, introducedToday, buildQueue, nextNew, stats, progress, wordState, wordLevel,
+    fmtInterval, fmtDue, preview, introducedToday, buildQueue, insertCards, nextNew, stats, progress, wordState, wordLevel,
     GAP, KNOWN_LEVEL, DEFAULT_MAX_DAYS,
   };
 })();

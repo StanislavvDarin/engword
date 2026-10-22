@@ -181,7 +181,7 @@
     const sk = streak();
     view.innerHTML = bar +
       '<div class="card"><div class="stat-grid">' +
-      '<div class="stat accent"><b id="n-due">' + (st.learn + st.review) + '</b><span>повторить сейчас</span></div>' +
+      '<div class="stat accent"><b id="n-due">' + st.reviewTotal + '</b><span>повторить сейчас</span></div>' +
       '<div class="stat"><b id="n-new">' + st.newLeft + '</b><span>новых на сегодня</span></div>' +
       '<div class="stat"><b>' + st.total + '</b><span>всего слов</span></div>' +
       '<div class="stat"><b>' + st.mastered + '</b><span>прочно выучено</span></div></div>' +
@@ -702,7 +702,7 @@
       '<label class="check"><input type="checkbox" id="s-auto"' + (PR().autoSpeak ? ' checked' : '') + '>Произносить слово автоматически</label>' +
       '<button class="btn" data-act="speak" data-text="Hello! This is how I pronounce English words.">' + I.speaker + 'Проверить голос</button></div>' +
       '<div class="card" id="dataCard"></div>' +
-      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 2.0 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
+      '<div class="card"><h3>О приложении</h3><p class="muted small" style="margin:0">English Words · версия 2.1 · <a href="privacy.html">политика конфиденциальности</a></p></div>';
     $('#s-accent').value = PR().accent;
     fillVoices();
     refreshData();

@@ -188,8 +188,7 @@
     const news = fresh.slice(0, limit);
     const units = [];
     const U = (arr, kind) => arr.forEach((x) => units.push({ id: x.w.id, kind }));
-    if (mode !== 'new') U(pendR, 'learn');
-    if (mode !== 'review') U(pendN, 'learn');
+    if (mode !== 'new') U(pendN.concat(pendR), 'learn'); // недоученные слова — всегда в «повторении»
     if (mode !== 'new') U(rev, 'review');
     if (mode !== 'review') U(news, 'new');
     // Порядок полностью случайный: слова вперемешку, направление каждой карточки и очерёдность направлений тоже случайные,
@@ -198,7 +197,7 @@
     const items = [];
     for (const u of units) for (const k of D) items.push({ id: u.id, k, kind: u.kind });
     spread(shuffle(items, o.rnd), o.rnd);
-    return { items, stats: { learn: pendN.length + pendR.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendR.length + rev.length, newTotal: pendN.length + news.length } };
+    return { items, stats: { learn: pendN.length + pendR.length, review: rev.length, newLeft: news.length, newEligible: fresh.length, reviewTotal: pendN.length + pendR.length + rev.length, newTotal: news.length } };
   }
 
   // Расталкивает карточки одного слова: между ними должно быть хотя бы несколько других (если очередь достаточно длинная)

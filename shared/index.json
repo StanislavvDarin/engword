@@ -5,6 +5,12 @@
       "name": "Животные (30)",
       "file": "animals-30.csv",
       "desc": "Пробный словарь: 30 названий животных с транскрипцией и примерами."
+    },
+    {
+      "id": "module8-word-list",
+      "name": "Module 8 Word List (Air and Sea Technology)",
+      "file": "module8-word-list.csv",
+      "desc": "Слова из Word List модуля 8 (тексты 8A, 8B, 8C) и расширенный список из Vocabulary notes."
     }
   ]
 }
